@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="default">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monkey of Babel</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header class="topbar">
+        <h1>Monkey of Babel</h1>
+        <div class="stats-row">
+            <div class="stat-pill">📄 <span id="pagesVal">0</span> pages</div>
+            <div class="stat-pill">🧠 <span id="intelligenceVal">0</span> intelligence</div>
+            <div class="stat-pill">💰 <span id="moneyVal">0</span> money</div>
+            <div class="stat-pill">🏆 <span id="fameVal">0</span> fame</div>
+            <div class="stat-pill">🎯 ×<span id="milestoneMultiplierVal">1</span> milestones</div>
+            <div class="stat-pill">🍌 <span id="prodigyTokensVal">0</span> tokens</div>
+        </div>
+    </header>
+
+    <div class="offline-banner" id="offlineBanner" hidden>
+        <div id="offlineBannerText"></div>
+        <button class="btn" id="dismissOfflineBtn">Nice</button>
+    </div>
+
+    <main class="layout">
+        <section class="panel" id="habitatPanel">
+            <h2>Monkey Habitat</h2>
+            <div class="meter-outer">
+                <div class="meter-inner habitat" id="habitatMeter" style="width:0%"></div>
+            </div>
+            <p class="meter-label">
+                <span id="habitatCountVal">0</span> / <span id="habitatCapVal">0</span> monkeys resting
+            </p>
+            <p class="hint" id="fillHint">Filling</p>
+        </section>
+
+        <section class="panel" id="typewriterPanel">
+            <h2>Typewriters</h2>
+            <div class="meter-outer">
+                <div class="meter-inner typewriters" id="typewriterMeter" style="width:0%"></div>
+            </div>
+            <p class="meter-label">
+                <span id="typewriterCountVal">0</span> / <span id="typewriterCapVal">0</span> monkeys typing
+            </p>
+            <p class="hint">Given enough monkeys and enough typewriters, one of them eventually writes Shakespeare — purely by chance. Seated monkeys generate intelligence with every keystroke, and cash in each finished page for money based on the words and sentences they typed.</p>
+            <p class="hint milestone-hint" id="typewriterMilestoneHint"></p>
+            <div class="button-row">
+                <button class="btn" id="assignOneBtn">+1</button>
+                <button class="btn" id="recallOneBtn">-1</button>
+                <button class="btn" id="fillTypewritersBtn">Fill</button>
+                <button class="btn" id="clearTypewritersBtn">Clear</button>
+            </div>
+        </section>
+
+        <section class="panel" id="trainingPanel">
+            <h2>Training</h2>
+            <p class="hint">Spend intelligence to make seated monkeys better typists.</p>
+
+            <div class="training-row">
+                <div class="training-info">
+                    <div class="training-name">Typing Speed</div>
+                    <div class="training-value"><span id="typingSpeedVal">0</span></div>
+                    <div class="training-milestone" id="typingSpeedMilestoneHint"></div>
+                </div>
+                <div class="buy-group">
+                    <button class="btn" id="trainTypingSpeedBtn">×1</button>
+                    <button class="btn" id="trainTypingSpeedBtn10">×10</button>
+                    <button class="btn" id="trainTypingSpeedBtn100">×100</button>
+                    <button class="btn" id="trainTypingSpeedBtnMax">×Max</button>
+                </div>
+            </div>
+
+            <div class="training-row">
+                <div class="training-info">
+                    <div class="training-name">Word Chance</div>
+                    <div class="training-value"><span id="wordChanceVal">0%</span></div>
+                    <div class="training-milestone" id="wordChanceMilestoneHint"></div>
+                </div>
+                <div class="buy-group">
+                    <button class="btn" id="trainWordChanceBtn">×1</button>
+                    <button class="btn" id="trainWordChanceBtn10">×10</button>
+                    <button class="btn" id="trainWordChanceBtn100">×100</button>
+                    <button class="btn" id="trainWordChanceBtnMax">×Max</button>
+                </div>
+            </div>
+
+            <div class="training-row">
+                <div class="training-info">
+                    <div class="training-name">Sentence Chance</div>
+                    <div class="training-value"><span id="sentenceChanceVal">0%</span></div>
+                    <div class="training-milestone" id="sentenceChanceMilestoneHint"></div>
+                </div>
+                <div class="buy-group">
+                    <button class="btn" id="trainSentenceChanceBtn">×1</button>
+                    <button class="btn" id="trainSentenceChanceBtn10">×10</button>
+                    <button class="btn" id="trainSentenceChanceBtn100">×100</button>
+                    <button class="btn" id="trainSentenceChanceBtnMax">×Max</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel" id="upgradesPanel">
+            <h2>Upgrades</h2>
+            <p class="hint">Spend money to grow capacity.</p>
+
+            <div class="training-row">
+                <div class="training-info">
+                    <div class="training-name">Add Typewriter</div>
+                    <div class="training-value">+1 typewriter</div>
+                </div>
+                <div class="buy-group">
+                    <button class="btn" id="buyTypewriterBtn">×1</button>
+                    <button class="btn" id="buyTypewriterBtn10">×10</button>
+                    <button class="btn" id="buyTypewriterBtn100">×100</button>
+                    <button class="btn" id="buyTypewriterBtnMax">×Max</button>
+                </div>
+            </div>
+
+            <div class="training-row">
+                <div class="training-info">
+                    <div class="training-name">Expand Habitat</div>
+                    <div class="training-value">+5 habitat capacity</div>
+                </div>
+                <div class="buy-group">
+                    <button class="btn" id="buyHabitatBtn">×1</button>
+                    <button class="btn" id="buyHabitatBtn10">×10</button>
+                    <button class="btn" id="buyHabitatBtn100">×100</button>
+                    <button class="btn" id="buyHabitatBtnMax">×Max</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="panel" id="feedPanel">
+            <h2>Recent Events</h2>
+            <p class="hint">Notable words and sentences your monkeys have typed.</p>
+            <div class="feed" id="feedList"></div>
+        </section>
+
+        <section class="panel panel-prestige" id="prestigePanel">
+            <h2>Publish a Manuscript</h2>
+            <p class="hint">Package everything your monkeys have written into a manuscript and sell it for fame. Fame is permanent and boosts money forever.</p>
+
+            <div class="training-row">
+                <div class="training-info">
+                    <div class="training-name">Current bonus</div>
+                    <div class="training-value"><span id="fameBonusVal">0%</span> money, permanent</div>
+                </div>
+            </div>
+
+            <div class="button-row">
+                <button class="btn btn-prestige" id="publishBtn">Publish for +<span id="fameGainVal">0</span> fame</button>
+            </div>
+            <p class="hint" id="publishHint"></p>
+        </section>
+
+        <section class="panel" id="libraryPanel">
+            <h2>Library</h2>
+            <p class="hint">Rare quotes your monkeys have stumbled onto, kept forever — even across publishing. Higher fame unlocks rarer finds.</p>
+            <p class="meter-label"><span id="libraryProgressVal">0 / 0</span> quotes found</p>
+            <div class="library-list" id="libraryList"></div>
+        </section>
+
+        <section class="panel" id="prodigyPanel">
+            <h2>Prodigy Roster</h2>
+            <p class="hint">Rare finds have a chance to drop a token. Spend tokens to pull for a random prodigy monkey — each one adds a permanent money bonus, and the roster survives publishing.</p>
+
+            <div class="training-row">
+                <div class="training-info">
+                    <div class="training-name">Current bonus</div>
+                    <div class="training-value"><span id="prodigyBonusVal">0%</span> money, permanent</div>
+                </div>
+            </div>
+
+            <p class="meter-label"><span id="prodigyProgressVal">0 / 0</span> monkeys found</p>
+
+            <div class="button-row">
+                <button class="btn btn-prestige" id="prodigyPullBtn">Pull</button>
+            </div>
+            <p class="hint" id="prodigyPullHint"></p>
+
+            <div class="library-list" id="prodigyList"></div>
+        </section>
+
+        <section class="panel" id="storePanel">
+            <h2>Store</h2>
+            <p class="hint">Mocked for now — no real ads or payments are wired up. Everything below grants its reward instantly; a real ad SDK or payment processor can be dropped in later without changing anything else.</p>
+            <p class="hint" id="storeStatusVal"></p>
+
+            <div class="store-subhead">Watch an Ad</div>
+            <div class="training-row">
+                <div class="training-info">
+                    <div class="training-name">2× Earnings (20 min)</div>
+                    <div class="training-value" id="earningsBoostStatusVal">Ready</div>
+                </div>
+                <button class="btn" id="watchEarningsBoostAdBtn">Watch Ad</button>
+            </div>
+            <div class="training-row">
+                <div class="training-info">
+                    <div class="training-name">Instant Page</div>
+                    <div class="training-value" id="instantPageStatusVal">Ready</div>
+                </div>
+                <button class="btn" id="watchInstantPageAdBtn">Watch Ad</button>
+            </div>
+
+            <div class="store-subhead">Time Skips</div>
+            <div class="button-row" id="timeSkipRow"></div>
+
+            <div class="store-subhead">Cosmetics</div>
+            <p class="hint">Click a theme to buy (mock) or equip it.</p>
+            <div class="library-list" id="cosmeticsList"></div>
+        </section>
+    </main>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
