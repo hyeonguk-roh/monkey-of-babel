@@ -14,7 +14,7 @@ export function applyOfflineProgress(state, savedAt) {
     const before = {
         money: state.currencies.money,
         intelligence: state.currencies.intelligence,
-        pagesCompleted: state.pagesCompleted,
+        pageCompletions: state.page.completions,
         habitatCount: Math.floor(state.habitat.count),
     };
 
@@ -27,7 +27,7 @@ export function applyOfflineProgress(state, savedAt) {
         capped: elapsedSeconds > simulatedSeconds,
         moneyEarned: state.currencies.money - before.money,
         intelligenceEarned: state.currencies.intelligence - before.intelligence,
-        pagesEarned: state.pagesCompleted - before.pagesCompleted,
+        pagesEarned: state.page.completions - before.pageCompletions,
         monkeysArrived: Math.floor(state.habitat.count) - before.habitatCount,
     };
 }

@@ -1,44 +1,47 @@
 import { CONFIG } from './config.js';
 import { createInitialState } from './state.js';
 
-// How much fame publishing right now would earn. Square-root scaling gives
-// diminishing returns, so there's no benefit to grinding pages forever
-// before publishing — the decision to prestige is about fame *rate*, not
-// just total pages banked.
-export function getFameGain(state) {
-    return Math.floor(Math.sqrt(state.pagesCompleted / CONFIG.prestige.pagesPerFame));
-}
-
+// A run is done when its one shelf is full — every book slot filled. No
+// formula, no partial credit: "can I publish" is answered by the shelf grid
+// being full, the same way it's drawn on screen.
 export function canPublish(state) {
-    return getFameGain(state) >= 1;
+    return state.shelf.booksCompleted >= CONFIG.run.booksPerShelf;
 }
 
-// Packages every page written so far into a manuscript, sells it for fame,
-// and starts a new run. Fame, the Library, the Prodigy roster (plus any
-// unspent tokens), and owned cosmetics survive — money, monkeys, training,
-// upgrades, and any active ad boost/cooldown all reset, same as a fresh game.
+// Photographs the finished shelf onto the permanent Library wall, sells it
+// for +1 fame, and starts a new run. Fame, the Library (rare quotes), the
+// Library wall (shelf thumbnails), the Prodigy roster (plus any unspent
+// tokens), owned cosmetics, and everPurchased (progressive-disclosure
+// unlock) survive — money, monkeys, training, upgrades, and the current
+// page/shelf all reset, same as a fresh game.
 export function publishManuscript(state) {
     if (!canPublish(state)) return false;
 
-    const fameGained = getFameGain(state);
-    const fame = state.fame + fameGained;
+    const fame = state.fame + 1;
     const library = state.library;
+    const libraryWall = state.libraryWall;
     const prodigy = state.prodigy;
     const prodigyTokens = state.prodigyTokens;
     const cosmetics = state.cosmetics;
+    const everPurchased = state.everPurchased;
+
+    libraryWall.push({ publishedAt: Date.now() });
 
     Object.assign(state, createInitialState());
     state.fame = fame;
     state.library = library;
+    state.libraryWall = libraryWall;
     state.prodigy = prodigy;
     state.prodigyTokens = prodigyTokens;
     state.cosmetics = cosmetics;
+    state.everPurchased = everPurchased;
 
-    return fameGained;
+    return 1;
 }
 
-// +X% money per fame point, applied to every source of income. Grows only
-// through publishing, never through money itself, so it can't compound.
+// +X% money per fame point (per shelf ever published), applied to every
+// source of income. Grows only through publishing, never through money
+// itself, so it can't compound within a run.
 export function getFameMoneyMultiplier(state) {
     return 1 + state.fame * CONFIG.prestige.moneyBonusPerFame;
 }

@@ -1,114 +1,123 @@
 import { CONFIG } from './config.js';
-import { createWorker } from './state.js';
-import { generateWord, generateSentence, generateRareFind } from './text.js';
+import { generateWord, generateSentence, generateGibberish, generateRareFind } from './text.js';
 import { getFameMoneyMultiplier } from './prestige.js';
-import { getMilestoneMoneyMultiplier } from './milestones.js';
 import { recordDiscovery } from './library.js';
 import { getProdigyMoneyMultiplier, maybeAwardToken, awardExpectedTokens } from './prodigy.js';
 import { getEarningsBoostMultiplier, canWatchInstantPageAd, recordInstantPageAdWatched } from './monetization.js';
 
 // Every source of money income goes through this: fame (permanent, across
-// prestiges), milestones (within-run, resets with everything else), the
-// prodigy roster (permanent, bounded by roster size), and a temporary
-// rewarded-ad boost (2x while active, 1x otherwise) all stack
+// prestiges), the prodigy roster (permanent, bounded by roster size), and a
+// temporary rewarded-ad boost (2x while active, 1x otherwise) all stack
 // multiplicatively.
 export function getMoneyMultiplier(state) {
     return getFameMoneyMultiplier(state)
-        * getMilestoneMoneyMultiplier(state)
         * getProdigyMoneyMultiplier(state)
         * getEarningsBoostMultiplier(state);
 }
 
-// Advance the world by dt seconds: refill the habitat and let seated
-// monkeys type. Monkeys stay seated until the player recalls them.
+// Advance the world by dt seconds: let idle monkeys wander into the
+// waiting pool, and let seated monkeys type onto the one shared page.
 //
 // Short ticks (live gameplay, ~1/60s at a time) simulate every individual
-// keystroke — that's cheap at that scale and gives correct per-keystroke
-// randomness. Long ticks (offline catch-up, up to 12 simulated hours in one
-// call) switch to an expected-value approximation instead: at trained
-// speeds with many typewriters, "one iteration per keystroke" is millions
-// of loop iterations and measurably hangs the page. The two paths are
-// mathematically equivalent in aggregate — see advanceWorkersExpected.
+// token — that's cheap at that scale and gives correct per-token randomness,
+// which is what makes the page's gibberish/word mix an honest readout of
+// wordChance/sentenceChance rather than a smoothed average. Long ticks
+// (offline catch-up, time skips) switch to an expected-value approximation
+// instead — see advancePageExpected for why that's mathematically
+// equivalent in aggregate, just without materializing the actual text.
 export function tick(state, dt) {
     fillHabitat(state, dt);
 
     if (dt > CONFIG.performance.fastPathThresholdSeconds) {
-        advanceWorkersExpected(state, dt);
+        advancePageExpected(state, dt);
     } else {
-        advanceWorkersExact(state, dt);
+        advancePageExact(state, dt);
     }
 }
 
 function fillHabitat(state, dt) {
-    const workingCount = state.typewriters.workers.length;
-    const room = Math.max(0, state.habitat.capacity - workingCount - state.habitat.count);
+    const room = Math.max(0, state.habitat.capacity - state.typewriters.seatedCount - state.habitat.count);
     state.habitat.count += Math.min(CONFIG.habitat.fillRatePerSecond * dt, room);
 }
 
-function advanceWorkersExact(state, dt) {
-    const charsPerSecond = state.training.typingSpeed.value;
-    let throttledTier = null; // best of 'sentence' | 'word' seen this tick
-    let sentenceCompletedThisTick = false;
+// Rough average rendered length (including the trailing space) of each kind
+// of token — used only to convert a token count into an expected glyph
+// count for the fast paths below (offline catch-up, time skips, the instant
+// page ad). The live/exact path never needs this: it generates the actual
+// string and measures its real length. Drifts a little if text.js's word
+// lists change length, but only pacing approximations depend on it.
+const GIBBERISH_AVG_GLYPHS = 3.5;
+const WORD_AVG_GLYPHS = 7;
+const SENTENCE_AVG_GLYPHS = 36;
 
-    for (const worker of state.typewriters.workers) {
-        worker.charAccumulator += charsPerSecond * dt;
-
-        while (worker.charAccumulator >= 1) {
-            worker.charAccumulator -= 1;
-            const tier = typeKeystroke(state, worker);
-
-            if (tier === 'sentence') {
-                sentenceCompletedThisTick = true;
-                throttledTier = 'sentence';
-            } else if (tier === 'word' && throttledTier !== 'sentence') {
-                throttledTier = 'word';
-            }
-        }
-    }
-
-    advanceRareFindGate(state, dt, sentenceCompletedThisTick);
-
-    // Cooldown is real time, not keystroke count — decrementing it once per
-    // tick (by dt) keeps the throttle independent of worker count. Doing it
-    // inside the keystroke loop above made it drain once per keystroke, so
-    // it emptied N times faster with N workers typing in parallel.
-    advanceFeedThrottle(state, dt, throttledTier);
+function avgGlyphsPerToken(state) {
+    const wc = state.training.wordChance.value;
+    const sc = state.training.sentenceChance.value;
+    const pSentence = wc * sc;
+    const pWord = wc * (1 - sc);
+    const pGibberish = 1 - wc;
+    return pGibberish * GIBBERISH_AVG_GLYPHS + pWord * WORD_AVG_GLYPHS + pSentence * SENTENCE_AVG_GLYPHS;
 }
 
-function typeKeystroke(state, worker) {
-    state.currencies.intelligence += CONFIG.typing.intelligencePerKeystroke;
-    worker.pageChars += 1;
-
-    // Mutually exclusive: a keystroke is at most one of these.
-    let tier = null;
-
+// One token event: rolls word chance, then (only if that hits) sentence
+// chance, and appends the resulting text as a styled segment to the shared
+// page. This is the whole "quality of the gibberish IS the stat readout"
+// mechanic — untrained monkeys (wordChance 0) never roll past the gibberish
+// branch at all.
+function rollToken(state) {
     if (Math.random() < state.training.wordChance.value) {
-        worker.pageWords += 1;
-        tier = 'word';
-
         if (Math.random() < state.training.sentenceChance.value) {
-            worker.pageSentences += 1;
-            tier = 'sentence';
+            return { text: generateSentence(), type: 'sentence' };
+        }
+        return { text: generateWord(), type: 'word' };
+    }
+    return { text: generateGibberish(), type: 'gibberish' };
+}
+
+function appendSegment(state, segment) {
+    const page = state.page;
+    const text = segment.text + ' ';
+    page.segments.push({ text, type: segment.type, payout: segment.payout });
+    page.length += text.length;
+
+    // Rare segments are paid out directly (awardRareFind) rather than
+    // through the word/sentence tallies, so they don't double-count here.
+    if (segment.type === 'word' || segment.type === 'sentence') page.words += 1;
+    if (segment.type === 'sentence') page.sentences += 1;
+}
+
+function advancePageExact(state, dt) {
+    const seated = state.typewriters.seatedCount;
+    let sentenceCompletedThisTick = false;
+
+    if (seated > 0) {
+        const tokensPerSecond = seated * state.training.typingSpeed.value;
+        state.page.tokenAccumulator += tokensPerSecond * dt;
+
+        while (state.page.tokenAccumulator >= 1) {
+            state.page.tokenAccumulator -= 1;
+            const segment = rollToken(state);
+            appendSegment(state, segment);
+            state.currencies.intelligence += CONFIG.typing.intelligencePerToken;
+
+            if (segment.type === 'sentence') sentenceCompletedThisTick = true;
+            if (state.page.length >= CONFIG.run.pageLengthGlyphs) completePage(state);
         }
     }
 
-    if (worker.pageChars >= CONFIG.typing.pageLengthChars) {
-        completePage(state, worker);
-    }
-
-    return tier;
+    // Cooldown is real time, not token count — decrementing it once per
+    // tick (by dt) keeps the throttle independent of how many monkeys are
+    // seated. Doing it inside the loop above would drain it once per token,
+    // emptying it N times faster with N tokens typed in parallel.
+    advanceRareFindGate(state, dt, sentenceCompletedThisTick);
 }
 
 // Gates the rare-find ROLL itself behind its own cooldown, independent of
-// the word/sentence display throttle above. This is what keeps rares rare
-// at any scale: the cooldown only resets on a successful roll, so the max
-// possible rate is a hard 1 per cooldownSeconds no matter how many
-// sentences complete per tick. While cooled down, no rolls happen at all;
-// once it clears, it retries every tick a sentence completes until one
-// hits — at high sentence volume that resolves within a frame or two, so
-// the observed rate converges to ~1 per cooldownSeconds without ever
-// exceeding it. At low sentence volume (early game), the natural rarity of
-// sentences completing at all keeps it well under that ceiling too.
+// how many sentences complete in a tick. This is what keeps rares rare at
+// any scale: the cooldown only resets on a successful roll, so the max
+// possible rate is a hard 1 per cooldownSeconds no matter how many sentences
+// land per tick. On a hit, the full quote is spliced into the live page as
+// its own gold segment — this is the "gold line mid-page" moment.
 function advanceRareFindGate(state, dt, sentenceCompletedThisTick) {
     const rareFind = state.rareFind;
     rareFind.cooldownSeconds = Math.max(0, rareFind.cooldownSeconds - dt);
@@ -118,9 +127,10 @@ function advanceRareFindGate(state, dt, sentenceCompletedThisTick) {
         const text = generateRareFind(state.fame);
         recordDiscovery(state, text);
         const payout = awardRareFind(state);
-        const tokenDropped = maybeAwardToken(state);
-        recordFeedEvent(state, 'rare', { text, payout, tokenDropped });
+        maybeAwardToken(state);
+        appendSegment(state, { text, type: 'rare', payout });
         rareFind.cooldownSeconds = CONFIG.economy.rareFind.cooldownSeconds;
+        if (state.page.length >= CONFIG.run.pageLengthGlyphs) completePage(state);
     }
 }
 
@@ -132,93 +142,116 @@ function awardRareFind(state) {
     return payout;
 }
 
-function completePage(state, worker) {
-    const baseMoney = worker.pageWords * CONFIG.economy.moneyPerWord
-        + worker.pageSentences * CONFIG.economy.moneyPerSentence;
-    const money = Math.round(baseMoney * getMoneyMultiplier(state));
+// Advances book/shelf progress by exactly one page, capping at a full
+// shelf — once booksCompleted reaches CONFIG.run.booksPerShelf, further
+// pages (typed while waiting to hit Publish) simply don't add more book
+// slots, since the shelf grid is already full.
+function advanceShelf(state) {
+    if (state.shelf.booksCompleted >= CONFIG.run.booksPerShelf) return;
 
-    state.currencies.money += money;
-    state.pagesCompleted += 1;
-
-    worker.pageChars = 0;
-    worker.pageWords = 0;
-    worker.pageSentences = 0;
+    state.shelf.pagesInBook += 1;
+    if (state.shelf.pagesInBook >= CONFIG.run.pagesPerBook) {
+        state.shelf.pagesInBook = 0;
+        state.shelf.booksCompleted += 1;
+    }
 }
 
-// Rewarded-ad trigger: instantly completes one page for every currently
-// seated monkey, at the EXPECTED word/sentence value for a full page (their
-// actual in-progress partial page is left untouched, so nothing here can
-// double-count once that page completes normally later). Returns the money
-// granted, or 0 if the ad isn't available (on cooldown) or no one's typing.
-export function triggerInstantPage(state) {
-    if (!canWatchInstantPageAd(state)) return 0;
-
-    const workingCount = state.typewriters.workers.length;
-    if (workingCount === 0) return 0;
-
-    const expectedWords = CONFIG.typing.pageLengthChars * state.training.wordChance.value;
-    const expectedSentences = expectedWords * state.training.sentenceChance.value;
-    const moneyPerPage = Math.round(
-        (expectedWords * CONFIG.economy.moneyPerWord + expectedSentences * CONFIG.economy.moneyPerSentence)
+function completePage(state) {
+    const page = state.page;
+    const money = Math.round(
+        (page.words * CONFIG.economy.moneyPerWord + page.sentences * CONFIG.economy.moneyPerSentence)
         * getMoneyMultiplier(state)
     );
+    state.currencies.money += money;
+    advanceShelf(state);
 
-    const totalMoney = moneyPerPage * workingCount;
-    state.currencies.money += totalMoney;
-    state.pagesCompleted += workingCount;
+    page.segments = [];
+    page.length = 0;
+    page.words = 0;
+    page.sentences = 0;
+    page.completions += 1;
+    // tokenAccumulator is untouched — leftover fractional typing progress
+    // shouldn't be lost just because the page flipped.
+}
+
+// Rewarded-ad trigger: instantly grants one page's worth of expected value
+// (money + intelligence, at the current training levels) and advances the
+// shelf by one page — without touching the live in-progress page, so
+// watching an ad doesn't interrupt the page you're mid-way through reading.
+// Returns the money granted, or 0 if the ad isn't available (on cooldown) or
+// no one's typing.
+export function triggerInstantPage(state) {
+    if (!canWatchInstantPageAd(state)) return 0;
+    if (state.typewriters.seatedCount === 0) return 0;
+
+    const wc = state.training.wordChance.value;
+    const sc = state.training.sentenceChance.value;
+    const expectedTokens = CONFIG.run.pageLengthGlyphs / avgGlyphsPerToken(state);
+    const expectedWordEvents = expectedTokens * wc;
+    const expectedSentenceEvents = expectedWordEvents * sc;
+
+    const money = Math.round(
+        (expectedWordEvents * CONFIG.economy.moneyPerWord + expectedSentenceEvents * CONFIG.economy.moneyPerSentence)
+        * getMoneyMultiplier(state)
+    );
+    state.currencies.money += money;
+    state.currencies.intelligence += Math.round(expectedTokens * CONFIG.typing.intelligencePerToken);
+    advanceShelf(state);
 
     recordInstantPageAdWatched(state);
-    return totalMoney;
+    return money;
 }
 
-// Expected-value fast path for long ticks (offline catch-up). Instead of
-// looping per keystroke, computes aggregate totals directly: over dt
-// seconds, workerCount * charsPerSecond * dt keystrokes happen in total,
-// and money/intelligence are exactly linear in words/sentences typed
-// (completePage's payout is proportional to the page's word/sentence
-// counts regardless of how those are distributed across pages), so summing
-// the *expected* words/sentences over the whole batch gives the same total
-// payout as simulating each page individually, modulo a less-than-one-page
-// rounding remainder that's negligible at this scale.
-function advanceWorkersExpected(state, dt) {
-    state.feed.cooldownSeconds = Math.max(0, state.feed.cooldownSeconds - dt);
-
-    const workerCount = state.typewriters.workers.length;
-    if (workerCount > 0) {
-        const charsPerSecond = state.training.typingSpeed.value;
-        const totalKeystrokes = workerCount * charsPerSecond * dt;
-
-        state.currencies.intelligence += totalKeystrokes * CONFIG.typing.intelligencePerKeystroke;
-
-        const totalWords = totalKeystrokes * state.training.wordChance.value;
-        const totalSentences = totalWords * state.training.sentenceChance.value;
-
-        const moneyFromTyping = Math.round(
-            (totalWords * CONFIG.economy.moneyPerWord + totalSentences * CONFIG.economy.moneyPerSentence)
-            * getMoneyMultiplier(state)
-        );
-        state.currencies.money += moneyFromTyping;
-        state.pagesCompleted += Math.floor(totalKeystrokes / CONFIG.typing.pageLengthChars);
-
-        // Losing each worker's in-progress partial page here is a rounding
-        // error of at most one page per worker — negligible next to the
-        // thousands of pages a multi-hour catch-up produces.
-        for (const worker of state.typewriters.workers) {
-            worker.charAccumulator = 0;
-            worker.pageChars = 0;
-            worker.pageWords = 0;
-            worker.pageSentences = 0;
-        }
+// Expected-value fast path for long ticks (offline catch-up, time skips).
+// Instead of looping per token, computes aggregate totals directly — money/
+// intelligence are exactly linear in tokens typed regardless of how they're
+// distributed across pages, so summing the *expected* counts over the whole
+// batch gives the same total as simulating each token individually, modulo
+// a less-than-one-page rounding remainder that's negligible at this scale.
+// It does NOT reconstruct the actual page text (that would mean generating
+// thousands of tokens just to throw them away) — the live page is simply
+// cleared, carrying over only its approximate fractional length.
+function advancePageExpected(state, dt) {
+    const seated = state.typewriters.seatedCount;
+    if (seated === 0) {
+        awardExpectedRareFinds(state, dt, false);
+        return;
     }
 
-    awardExpectedRareFinds(state, dt, workerCount > 0);
+    const tokensPerSecond = seated * state.training.typingSpeed.value;
+    const totalTokens = tokensPerSecond * dt;
+
+    state.currencies.intelligence += totalTokens * CONFIG.typing.intelligencePerToken;
+
+    const wc = state.training.wordChance.value;
+    const sc = state.training.sentenceChance.value;
+    const totalWordEvents = totalTokens * wc;
+    const totalSentenceEvents = totalWordEvents * sc;
+
+    const money = Math.round(
+        (totalWordEvents * CONFIG.economy.moneyPerWord + totalSentenceEvents * CONFIG.economy.moneyPerSentence)
+        * getMoneyMultiplier(state)
+    );
+    state.currencies.money += money;
+
+    const totalGlyphs = totalTokens * avgGlyphsPerToken(state);
+    const pagesCompleted = Math.floor((state.page.length + totalGlyphs) / CONFIG.run.pageLengthGlyphs);
+
+    state.page.segments = [];
+    state.page.length = (state.page.length + totalGlyphs) % CONFIG.run.pageLengthGlyphs;
+    state.page.words = 0;
+    state.page.sentences = 0;
+    for (let i = 0; i < pagesCompleted; i++) advanceShelf(state);
+    if (pagesCompleted > 0) state.page.completions += 1;
+
+    awardExpectedRareFinds(state, dt, true);
 }
 
-// Same cooldown-gated rule as advanceRareFindGate, batched: at most one
-// rare per cooldownSeconds, so a dt-second window can award at most
-// floor(dt / cooldownSeconds) of them — never the "every sentence rolls
-// independently" firehose the per-keystroke chance alone would produce
-// across millions of offline keystrokes.
+// Same cooldown-gated rule as advanceRareFindGate, batched: at most one rare
+// per cooldownSeconds, so a dt-second window can award at most
+// floor(dt / cooldownSeconds) of them. Every rare still gets a quote drawn
+// and recorded in the Library; it just isn't spliced into the (already
+// cleared) live page text.
 function awardExpectedRareFinds(state, dt, typingHappened) {
     const settings = CONFIG.economy.rareFind;
     const raresCount = typingHappened ? Math.floor(dt / settings.cooldownSeconds) : 0;
@@ -228,86 +261,31 @@ function awardExpectedRareFinds(state, dt, typingHappened) {
         return;
     }
 
-    // Every rare gets a quote drawn and recorded in the Library — that's
-    // cheap even for the ~180 a 12-hour catch-up can produce. Only the
-    // trailing few get an actual feed entry, since the rest would just be
-    // evicted immediately by the feed's cap anyway.
-    const feedEntries = Math.min(raresCount, CONFIG.feed.maxItems);
     for (let i = 0; i < raresCount; i++) {
-        const payout = awardRareFind(state);
-        const text = generateRareFind(state.fame);
-        recordDiscovery(state, text);
-        if (i >= raresCount - feedEntries) {
-            recordFeedEvent(state, 'rare', { text, payout });
-        }
+        awardRareFind(state);
+        recordDiscovery(state, generateRareFind(state.fame));
     }
 
     state.rareFind.cooldownSeconds = settings.cooldownSeconds - (dt % settings.cooldownSeconds);
     awardExpectedTokens(state, raresCount);
 }
 
-// Ticks the feed's cooldown by dt (real/simulated time, not keystroke count),
-// and logs one event once the cooldown clears — preferring a sentence over a
-// plain word, since it's the rarer, more notable of the two. Rare finds
-// don't go through this at all: they're logged immediately in advanceWorkers,
-// unthrottled. This function only touches the throttled word/sentence slot;
-// it never touches currencies itself.
-function advanceFeedThrottle(state, dt, tier) {
-    const feed = state.feed;
-    feed.cooldownSeconds = Math.max(0, feed.cooldownSeconds - dt);
-    if (feed.cooldownSeconds > 0) return;
-    if (!tier) return;
-
-    recordFeedEvent(state, tier);
-    feed.cooldownSeconds = CONFIG.feed.minSecondsBetweenEvents;
-}
-
-function recordFeedEvent(state, type, options = {}) {
-    const text = options.text ?? (type === 'sentence' ? generateSentence() : generateWord());
-    const item = { id: state.feed.nextId, type, text };
-    if (type === 'rare') {
-        item.payout = options.payout;
-        item.tokenDropped = options.tokenDropped ?? false;
-    }
-
-    state.feed.nextId += 1;
-    state.feed.items.unshift(item);
-    trimFeed(state);
-}
-
-// Rare finds are guaranteed to stay visible: when trimming back down to
-// size, evict the oldest non-rare item first. Only fall back to evicting a
-// rare item if the feed is somehow entirely rare finds.
-function trimFeed(state) {
-    const items = state.feed.items;
-    while (items.length > CONFIG.feed.maxItems) {
-        let evictIndex = -1;
-        for (let i = items.length - 1; i >= 0; i--) {
-            if (items[i].type !== 'rare') {
-                evictIndex = i;
-                break;
-            }
-        }
-        items.splice(evictIndex === -1 ? items.length - 1 : evictIndex, 1);
-    }
-}
-
 // Player actions — each returns false (and does nothing) if it isn't
 // currently possible, so callers can just re-render either way.
 
 export function assignWorker(state) {
-    if (state.typewriters.workers.length >= state.typewriters.capacity) return false;
+    if (state.typewriters.seatedCount >= state.typewriters.capacity) return false;
     if (Math.floor(state.habitat.count) < 1) return false;
 
     state.habitat.count -= 1;
-    state.typewriters.workers.push(createWorker());
+    state.typewriters.seatedCount += 1;
     return true;
 }
 
 export function recallWorker(state) {
-    if (state.typewriters.workers.length === 0) return false;
+    if (state.typewriters.seatedCount === 0) return false;
 
-    state.typewriters.workers.pop();
+    state.typewriters.seatedCount -= 1;
     state.habitat.count = Math.min(state.habitat.capacity, state.habitat.count + 1);
     return true;
 }
@@ -320,174 +298,70 @@ export function clearTypewriters(state) {
     while (recallWorker(state)) { /* keep going until every typewriter is empty */ }
 }
 
-// Shared by training and upgrades: cost of the Nth purchase.
+// --- Training: spend intelligence to level up a stat ---
+// --- Upgrades: spend money to reveal one more grid slot ---
+//
+// Both are small, bounded, single-step purchases now (no more ×1/×10/×100
+// bulk tiers — with capacity/levels capped this low, buying more than one
+// at a time stopped being meaningful). cost of the Nth purchase = round
+// (baseCost * costGrowth ^ N).
+
 function scaledCost(settings, level) {
     return Math.round(settings.baseCost * Math.pow(settings.costGrowth, level));
 }
 
-// --- Training: spend intelligence to make seated monkeys better typists ---
-
-// Fixed-size tiers (×1/×10/×100): how many of the next `tierCount` levels
-// are even POSSIBLE before hitting the value cap, and what the full batch
-// costs. Ignores current currency entirely — the label always names its
-// nominal size (or less, only when the cap itself makes more impossible),
-// so ×10 never silently shrinks to "whatever you can afford" and start
-// looking identical to ×Max. Purchasing is all-or-nothing against this.
-function previewTrainingTier(state, key, tierCount) {
+// null means maxed — no further purchase is possible.
+export function getTrainingCost(state, key) {
     const settings = CONFIG.training[key];
-    const training = state.training[key];
-
-    let level = training.level;
-    let value = training.value;
-    let total = 0;
-    let count = 0;
-    const maxed = value >= settings.cap;
-
-    while (count < tierCount && value < settings.cap) {
-        total += scaledCost(settings, level);
-        level += 1;
-        value = Math.min(settings.cap, value + settings.increment);
-        count += 1;
-    }
-
-    return { count, cost: total, maxed };
+    const level = state.training[key].level;
+    return level >= settings.levels ? null : scaledCost(settings, level);
 }
 
-// Max: budget-aware, the one tier that does a partial buy — as many levels
-// as currently affordable, up to the value cap.
-function previewTrainingMax(state, key) {
+export function purchaseTraining(state, key) {
+    const cost = getTrainingCost(state, key);
+    if (cost === null || state.currencies.intelligence < cost) return false;
+
     const settings = CONFIG.training[key];
-    const training = state.training[key];
-    const budget = state.currencies.intelligence;
-
-    let level = training.level;
-    let value = training.value;
-    let total = 0;
-    let count = 0;
-    const maxed = value >= settings.cap;
-
-    while (value < settings.cap) {
-        const cost = scaledCost(settings, level);
-        if (total + cost > budget) break;
-        total += cost;
-        level += 1;
-        value = Math.min(settings.cap, value + settings.increment);
-        count += 1;
-    }
-
-    return { count, cost: total, maxed };
-}
-
-// tierCount: 1, 10, 100 for the fixed tiers, or Infinity for Max.
-export function getTrainingPreview(state, key, tierCount) {
-    return tierCount === Infinity
-        ? previewTrainingMax(state, key)
-        : previewTrainingTier(state, key, tierCount);
-}
-
-function applyTrainingPurchase(state, key, count, cost) {
-    const settings = CONFIG.training[key];
-    const training = state.training[key];
-
     state.currencies.intelligence -= cost;
-    training.level += count;
-    training.value = Math.min(settings.cap, training.value + settings.increment * count);
+    state.training[key].level += 1;
+    state.training[key].value = settings.base + state.training[key].level * settings.perLevel;
+    state.everPurchased = true;
+    return true;
 }
 
-export function purchaseTrainingMultiple(state, key, tierCount) {
-    if (tierCount === Infinity) {
-        const { count, cost } = previewTrainingMax(state, key);
-        if (count === 0) return 0;
-        applyTrainingPurchase(state, key, count, cost);
-        return count;
-    }
-
-    const { count, cost } = previewTrainingTier(state, key, tierCount);
-    if (count === 0 || state.currencies.intelligence < cost) return 0;
-    applyTrainingPurchase(state, key, count, cost);
-    return count;
-}
-
-// --- Upgrades: spend money to grow capacity ---
-
-// Where each upgrade's capacity actually lives in state. To sell a new
-// capacity upgrade, add a CONFIG.upgrades entry and a matching one here.
-const UPGRADE_TARGETS = {
+// Where each upgrade's capacity actually lives in state, and its bounds. To
+// sell a new capacity upgrade, add a CONFIG.upgrades entry, a maxCapacity/
+// startingCapacity pair, and a matching one here.
+const CAPACITY_TARGETS = {
     typewriters: {
         get: (state) => state.typewriters.capacity,
         set: (state, value) => { state.typewriters.capacity = value; },
+        max: CONFIG.typewriters.maxCapacity,
+        starting: CONFIG.typewriters.startingCapacity,
     },
     habitat: {
         get: (state) => state.habitat.capacity,
         set: (state, value) => { state.habitat.capacity = value; },
+        max: CONFIG.habitat.maxCapacity,
+        starting: CONFIG.habitat.startingCapacity,
     },
 };
 
-// Fixed-size tiers, upgrade version — same idea as previewTrainingTier, but
-// upgrades have no cap so `count` is always exactly `tierCount`.
-function previewUpgradeTier(state, key, tierCount) {
-    const settings = CONFIG.upgrades[key];
-    const upgrade = state.upgrades[key];
-
-    let level = upgrade.level;
-    let total = 0;
-
-    for (let i = 0; i < tierCount; i++) {
-        total += scaledCost(settings, level);
-        level += 1;
-    }
-
-    return { count: tierCount, cost: total, maxed: false };
+// null means maxed — the grid is already at its full size.
+export function getUpgradeCost(state, key) {
+    const target = CAPACITY_TARGETS[key];
+    const capacity = target.get(state);
+    if (capacity >= target.max) return null;
+    return scaledCost(CONFIG.upgrades[key], capacity - target.starting);
 }
 
-// Max: budget-aware partial buy, same as previewTrainingMax.
-function previewUpgradeMax(state, key) {
-    const settings = CONFIG.upgrades[key];
-    const upgrade = state.upgrades[key];
-    const budget = state.currencies.money;
+export function purchaseUpgrade(state, key) {
+    const cost = getUpgradeCost(state, key);
+    if (cost === null || state.currencies.money < cost) return false;
 
-    let level = upgrade.level;
-    let total = 0;
-    let count = 0;
-
-    while (true) {
-        const cost = scaledCost(settings, level);
-        if (total + cost > budget) break;
-        total += cost;
-        level += 1;
-        count += 1;
-    }
-
-    return { count, cost: total, maxed: false };
-}
-
-export function getUpgradePreview(state, key, tierCount) {
-    return tierCount === Infinity
-        ? previewUpgradeMax(state, key)
-        : previewUpgradeTier(state, key, tierCount);
-}
-
-function applyUpgradePurchase(state, key, count, cost) {
-    const settings = CONFIG.upgrades[key];
-    const upgrade = state.upgrades[key];
-
+    const target = CAPACITY_TARGETS[key];
     state.currencies.money -= cost;
-    upgrade.level += count;
-
-    const target = UPGRADE_TARGETS[key];
-    target.set(state, target.get(state) + settings.increment * count);
-}
-
-export function purchaseUpgradeMultiple(state, key, tierCount) {
-    if (tierCount === Infinity) {
-        const { count, cost } = previewUpgradeMax(state, key);
-        if (count === 0) return 0;
-        applyUpgradePurchase(state, key, count, cost);
-        return count;
-    }
-
-    const { count, cost } = previewUpgradeTier(state, key, tierCount);
-    if (state.currencies.money < cost) return 0;
-    applyUpgradePurchase(state, key, count, cost);
-    return count;
+    target.set(state, target.get(state) + 1);
+    state.everPurchased = true;
+    return true;
 }
