@@ -4,16 +4,26 @@ import { CONFIG } from './config.js';
 // same as fame and the Library). Each owned monkey adds a fixed money
 // bonus. Add more here any time — the roster is capped by list length, not
 // a formula, so growing it is just adding a row.
+//
+// icon is what's actually shown in the (iconography-only) Roster; name is
+// kept for the row's hover tooltip.
 export const PRODIGY_MONKEYS = [
-    { id: 'nibbles', name: 'Nibbles', rarity: 'common', moneyBonus: 0.02 },
-    { id: 'inkstain', name: 'Inkstain', rarity: 'common', moneyBonus: 0.02 },
-    { id: 'quillfinger', name: 'Quillfinger', rarity: 'common', moneyBonus: 0.02 },
-    { id: 'pagerustle', name: 'Page Rustle', rarity: 'common', moneyBonus: 0.02 },
-    { id: 'sirtypewell', name: 'Sir Typewell', rarity: 'rare', moneyBonus: 0.05 },
-    { id: 'ladyclatter', name: 'Lady Clatter', rarity: 'rare', moneyBonus: 0.05 },
-    { id: 'bardbrow', name: 'Bardbrow', rarity: 'epic', moneyBonus: 0.15 },
-    { id: 'thewillfulone', name: 'The Willful One', rarity: 'legendary', moneyBonus: 0.25 },
+    { id: 'nibbles', name: 'Nibbles', icon: '🍪', rarity: 'common', moneyBonus: 0.02 },
+    { id: 'inkstain', name: 'Inkstain', icon: '🖋️', rarity: 'common', moneyBonus: 0.02 },
+    { id: 'quillfinger', name: 'Quillfinger', icon: '🪶', rarity: 'common', moneyBonus: 0.02 },
+    { id: 'pagerustle', name: 'Page Rustle', icon: '📄', rarity: 'common', moneyBonus: 0.02 },
+    { id: 'sirtypewell', name: 'Sir Typewell', icon: '🎩', rarity: 'rare', moneyBonus: 0.05 },
+    { id: 'ladyclatter', name: 'Lady Clatter', icon: '👒', rarity: 'rare', moneyBonus: 0.05 },
+    { id: 'bardbrow', name: 'Bardbrow', icon: '🎭', rarity: 'epic', moneyBonus: 0.15 },
+    { id: 'thewillfulone', name: 'The Willful One', icon: '👑', rarity: 'legendary', moneyBonus: 0.25 },
 ];
+
+// A colored-dot stand-in for the rarity word (Common/Rare/Epic/Legendary)
+// wherever the UI can't show text.
+const RARITY_ICONS = { common: '🟢', rare: '🔵', epic: '🟣', legendary: '🟡' };
+export function getRarityIcon(rarity) {
+    return RARITY_ICONS[rarity];
+}
 
 const RARITY_WEIGHTS = { common: 60, rare: 30, epic: 8, legendary: 2 };
 
@@ -41,6 +51,13 @@ export function getProdigyMoneyMultiplier(state) {
         return sum + (monkey ? monkey.moneyBonus : 0);
     }, 0);
     return 1 + bonus;
+}
+
+// The bonus fraction if every monkey were owned — the denominator for a
+// "current bonus vs. max possible" meter, since (unlike fame) this bonus
+// has a real, fixed ceiling.
+export function getMaxProdigyBonus() {
+    return PRODIGY_MONKEYS.reduce((sum, monkey) => sum + monkey.moneyBonus, 0);
 }
 
 // Called once per rare find (live and offline paths) — a chance to also

@@ -1,6 +1,8 @@
-// Procedurally generates the text a monkey "typed" for the event feed:
-// real English words, assembled into sentences via random templates.
-// Pure flavor text — has no effect on the economy, just what gets shown.
+// Procedurally generates the text a monkey "typed" onto the live page: real
+// English words assembled into sentences via random templates, or gibberish
+// for the untrained case. Purely presentational — simulation.js decides
+// (via wordChance/sentenceChance rolls) which kind of token happened; this
+// module only supplies the string shown for that outcome.
 
 const NOUNS = [
     'monkey', 'typewriter', 'banana', 'ribbon', 'page', 'ink', 'jungle', 'letter',
@@ -32,19 +34,24 @@ const ALL_WORDS = [...NOUNS, ...VERBS, ...ADJECTIVES, ...ADVERBS];
 // Library a reason to keep unlocking across many runs, not just one. Add
 // more here any time (keep at least one at fameRequired: 0 so the pool is
 // never empty); nothing else needs to change.
+//
+// icon is a per-quote emoji so a found row in the (iconography-only)
+// Library is still distinguishable from every other found row, even though
+// the quote text itself isn't displayed there; text stays as the row's
+// hover tooltip and as what actually lands in the feed/state.
 export const RARE_QUOTES = [
-    { text: 'To be, or not to be, that is the question.', fameRequired: 0 },
-    { text: "All the world's a stage, and all the men and women merely players.", fameRequired: 0 },
-    { text: "Though this be madness, yet there is method in't.", fameRequired: 0 },
-    { text: 'The lady doth protest too much, methinks.', fameRequired: 0 },
-    { text: 'Some are born great, some achieve greatness, and some have greatness thrust upon them.', fameRequired: 5 },
-    { text: "What's in a name? That which we call a rose by any other name would smell as sweet.", fameRequired: 5 },
-    { text: 'We know what we are, but know not what we may be.', fameRequired: 5 },
-    { text: 'Brevity is the soul of wit.', fameRequired: 15 },
-    { text: 'Better three hours too soon than a minute too late.', fameRequired: 15 },
-    { text: 'The course of true love never did run smooth.', fameRequired: 15 },
-    { text: 'This above all: to thine own self be true.', fameRequired: 40 },
-    { text: 'Cowards die many times before their deaths; the valiant never taste of death but once.', fameRequired: 40 },
+    { text: 'To be, or not to be, that is the question.', icon: '💀', fameRequired: 0 },
+    { text: "All the world's a stage, and all the men and women merely players.", icon: '🎭', fameRequired: 0 },
+    { text: "Though this be madness, yet there is method in't.", icon: '🤪', fameRequired: 0 },
+    { text: 'The lady doth protest too much, methinks.', icon: '🗣️', fameRequired: 0 },
+    { text: 'Some are born great, some achieve greatness, and some have greatness thrust upon them.', icon: '👑', fameRequired: 5 },
+    { text: "What's in a name? That which we call a rose by any other name would smell as sweet.", icon: '🌹', fameRequired: 5 },
+    { text: 'We know what we are, but know not what we may be.', icon: '🌀', fameRequired: 5 },
+    { text: 'Brevity is the soul of wit.', icon: '⏱️', fameRequired: 15 },
+    { text: 'Better three hours too soon than a minute too late.', icon: '⏰', fameRequired: 15 },
+    { text: 'The course of true love never did run smooth.', icon: '💔', fameRequired: 15 },
+    { text: 'This above all: to thine own self be true.', icon: '🪞', fameRequired: 40 },
+    { text: 'Cowards die many times before their deaths; the valiant never taste of death but once.', icon: '⚔️', fameRequired: 40 },
 ];
 
 // Each returns a full sentence, given random pick functions for each part
@@ -71,6 +78,21 @@ function capitalize(word) {
 
 function article(word) {
     return /^[aeiou]/i.test(word) ? 'an' : 'a';
+}
+
+// Consonant-heavy on purpose — this is what an untrained monkey's keystrokes
+// look like before wordChance ever fires, so it needs to read as clearly
+// NOT a word (unlike ALL_WORDS above, which are all real). 1-4 letters,
+// same rough shape as a real word so it slots into the page the same way.
+const GIBBERISH_LETTERS = 'qwxzjkbvpfgmrsthld';
+
+export function generateGibberish() {
+    const length = 1 + Math.floor(Math.random() * 4);
+    let token = '';
+    for (let i = 0; i < length; i++) {
+        token += GIBBERISH_LETTERS[Math.floor(Math.random() * GIBBERISH_LETTERS.length)];
+    }
+    return token;
 }
 
 export function generateWord() {

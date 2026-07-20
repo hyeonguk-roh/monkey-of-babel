@@ -1,113 +1,115 @@
 // Every tunable game value lives here. Change a number, refresh the page —
 // nothing else needs to be touched to retune the game.
+//
+// This config was rebuilt around one constraint: everything within a run
+// must be small enough to draw as countable objects (a grid of typewriters,
+// a pile of coins, a shelf of books) instead of an ever-growing number. A
+// run is bounded — fill one shelf — and prestige (see prestige.js) is the
+// only place growth is allowed to be open-ended, via permanent fame.
 
 export const CONFIG = {
-    // The habitat: idle monkeys live here and refill automatically over time.
+    // The shape of one run: write pages, pages bind into books, books fill a
+    // shelf. Reaching a full shelf is the run's single visible goal — no
+    // number goes up forever, the shelf just fills. 12 books x 10 pages is
+    // sized to read as a real bookshelf grid. Verified against pacing.mjs
+    // (an always-buy-when-affordable script, faster than realistic
+    // click-by-click play) at ~9.5 minutes — real casual play should land
+    // in the 10-15 minute range this was tuned for.
+    run: {
+        pageLengthGlyphs: 400,
+        pagesPerBook: 10,
+        booksPerShelf: 12,
+    },
+
+    // The habitat is now just the idle-monkey waiting pool feeding the
+    // typewriter grid directly — capped low enough to draw as individual
+    // monkey sprites, not a fill bar.
     habitat: {
-        startingCount: 0,
-        capacity: 20,             // max monkeys the habitat + typewriters can hold combined
-        fillRatePerSecond: 0.3,   // how fast new monkeys appear while there's room
+        startingCount: 1,
+        startingCapacity: 4,
+        maxCapacity: 16,
+        fillRatePerSecond: 0.3,   // how fast new monkeys wander into the pool while there's room
     },
 
-    // The typewriters: infinite monkeys, infinite typewriters, eventually Shakespeare.
-    // Monkeys stay seated until you recall them — no fatigue, no auto-eject.
+    // The typewriter grid: capped low enough to draw as a literal grid of
+    // typewriter sprites. Buying one reveals exactly one more slot.
     typewriters: {
-        capacity: 12,             // how many typewriters are available to sit a monkey at
+        startingCapacity: 2,
+        maxCapacity: 12,
     },
 
-    // Typing: what a seated monkey produces, one keystroke at a time.
-    // These are STARTING values only — see `training` below for how they
-    // grow as intelligence is spent. Odds start low on purpose: a monkey
-    // banging on a typewriter should rarely produce a real word at first.
+    // What a seated monkey produces, once per token-event (see
+    // simulation.js — a "token" is either a short gibberish fragment or a
+    // real word/sentence, decided by training below; either way it costs
+    // one time-slot at the current typing rate).
     typing: {
-        charsPerSecondPerMonkey: 2,    // typing speed per seated monkey
-        intelligencePerKeystroke: 1,   // intelligence gained for every character typed
-        pageLengthChars: 400,          // characters needed to finish a page
-        wordChance: 0.03,              // chance a given keystroke also completes a word
-        sentenceChance: 0.04,          // chance a completed word also completes a sentence
+        intelligencePerToken: 1,
     },
 
-    // Economy: what a finished page cashes in for.
+    // Economy: what a finished page cashes in for. Untrained monkeys (word/
+    // sentence chance both start at 0 — see training below) earn nothing
+    // but intelligence until the player trains at least wordChance once;
+    // that's an intentional first step, not an oversight.
     economy: {
         moneyPerWord: 1,
         moneyPerSentence: 5,
 
         // Rare finds: on a completed sentence, a small chance the monkey
-        // accidentally typed something real. Payout scales with typewriter
-        // capacity (a proxy for how developed your operation is) rather
-        // than current money — scaling off current money would compound:
-        // a long offline catch-up with word/sentence chance maxed out can
-        // produce hundreds of rare finds in one go, and each one taking a
-        // cut of the *already-boosted* total is exponential blowup, not a
-        // bonus. This formula stays linear no matter how many land at once.
-        //
-        // cooldownSeconds is what actually keeps rares rare: the roll only
-        // happens once the cooldown clears (see simulation.js's rare-find
-        // gate), so the max possible rate is a hard 1 per cooldownSeconds
-        // no matter how many sentences complete per tick. `chance` then
-        // gates *that* roll — at full scale it resolves almost immediately
-        // once eligible, converging to ~1 every cooldownSeconds (~15/hr at
-        // the default 240s); early game, low sentence volume keeps it rarer
-        // than that ceiling.
+        // accidentally typed something real (see text.js RARE_QUOTES) —
+        // rendered as a gold line straight in the page. Shorter cooldown
+        // and higher per-tick chance than the old open-ended game, since a
+        // whole run is now only ~10-15 minutes — this still keeps rares
+        // rare (see the gate in simulation.js) while making sure most runs
+        // see at least one or two.
         rareFind: {
-            chance: 0.01,
-            cooldownSeconds: 240,
-            multiplier: 50,    // payout = moneyPerSentence * multiplier * typewriter capacity
+            chance: 0.05,
+            cooldownSeconds: 90,
+            multiplier: 6,   // payout = moneyPerSentence * multiplier * typewriter capacity
         },
     },
 
-    // Spend intelligence here to make seated monkeys better typists.
-    // cost of the Nth purchase = round(baseCost * costGrowth ^ N)
-    training: {
-        typingSpeed: { baseCost: 10, costGrowth: 1.22, increment: 0.5, cap: Infinity },
-        wordChance: { baseCost: 15, costGrowth: 1.30, increment: 0.01, cap: 0.50 },
-        sentenceChance: { baseCost: 20, costGrowth: 1.35, increment: 0.01, cap: 0.50 },
-    },
-
-    // Spend money here to grow capacity. Same cost formula as training, above.
-    // Add a new entry here (and a matching one in simulation.js's UPGRADE_TARGETS)
-    // to sell more things with money.
-    upgrades: {
-        typewriters: { baseCost: 40, costGrowth: 1.30, increment: 1 },  // +1 typewriter
-        habitat: { baseCost: 20, costGrowth: 1.20, increment: 5 },      // +5 habitat capacity
-    },
-
-    // Prestige: package everything written so far into a manuscript, sell
-    // it for fame, and start a new run. Fame never resets — it's a
-    // permanent bonus for every run after this one.
-    prestige: {
-        pagesPerFame: 1000,        // fame gained = floor(sqrt(pagesCompleted / this))
-        moneyBonusPerFame: 0.02,   // +2% money per fame point, applied to every source of income
-    },
-
-    // Milestones: every N typewriters bought, or every N levels of a given
-    // training stat, doubles the milestone money multiplier. Unlike fame,
-    // this is a WITHIN-run snowball — it's driven by state.typewriters and
-    // state.training, which reset on prestige, so it naturally resets too.
-    // "Almost at a milestone" is meant to be a session-extender.
+    // Spend intelligence to level up a stat. Each is a small, fixed number
+    // of discrete levels — countable as a row of icons, not a percentage
+    // dial. cost of the Nth level = round(baseCost * costGrowth ^ N).
     //
-    // every:25/every:10 (one milestone per training STAT, i.e. 3 independent
-    // tracks) measured out to money hitting $41M within 10 minutes and a
-    // 65,536x multiplier by hour 2 with the ×Max buttons — it silently
-    // undid the training/money pacing tuned earlier. every:50/every:40 was
-    // simulation-verified instead: training still hasn't capped by hour 4
-    // (matching the untuned-milestone baseline), money reaches ~$14.5M by
-    // hour 4 vs. ~$659K with milestones off (a real snowball, not a
-    // blowup), and fame-at-hour-4 lands at 7, same as before milestones
-    // existed at all.
-    milestones: {
-        typewriters: { every: 50 },
-        training: { every: 40 },
+    // wordChance/sentenceChance start at 0: a fresh run's monkeys are pure
+    // gibberish until trained, so the very first purchase a player makes is
+    // what turns on real words at all. Both cap at 50% total, split across
+    // 10 levels of +5% each. typingSpeed starts at a slow 1 token/sec and
+    // caps at 5 across 8 levels — fast enough to feel earned, never an
+    // unbounded number. Costs verified against pacing.mjs (see the
+    // Verification section of the redesign plan) to land a full shelf
+    // around 10-15 minutes of active play, not 2.
+    training: {
+        typingSpeed: { base: 1, perLevel: 0.5, levels: 8, baseCost: 40, costGrowth: 1.7 },
+        wordChance: { base: 0, perLevel: 0.05, levels: 10, baseCost: 35, costGrowth: 1.65 },
+        sentenceChance: { base: 0, perLevel: 0.05, levels: 10, baseCost: 60, costGrowth: 1.7 },
+    },
+
+    // Spend money to reveal one more typewriter/habitat slot. Same cost
+    // formula as training. increment is always 1 — "buy one, it appears"
+    // — up to habitat.maxCapacity / typewriters.maxCapacity above.
+    upgrades: {
+        typewriters: { baseCost: 70, costGrowth: 1.75 },
+        habitat: { baseCost: 35, costGrowth: 1.65 },
+    },
+
+    // Prestige: photograph the finished shelf into the permanent Library
+    // wall and start a new one. Fame is simply +1 per shelf — the bounded
+    // run is the compensator for growth that used to live in a pages/fame
+    // formula; now the exponential curve only lives across runs, via this.
+    prestige: {
+        moneyBonusPerFame: 0.05,   // +5% money per fame point (per shelf published), applied to every source of income
     },
 
     // Prodigy roster: pull with tokens for a random monkey from a fixed
-    // roster (see prodigy.js). Unlike milestones, the total possible bonus
-    // here is capped by the roster's fixed size, not exponential per level
-    // — owning everything tops out around +58% money, so there's no
-    // runaway-growth risk to re-verify no matter how fast tokens come in.
-    // Tokens piggyback on the already-tuned rare-find cadence (a chance
-    // each rare find also drops one) rather than a second independent rare
-    // event, so they inherit the same "stays rare at any scale" guarantee.
+    // roster (see prodigy.js). Unlike a within-run stat, the total possible
+    // bonus here is capped by the roster's fixed size, not exponential per
+    // level — owning everything tops out around +58% money, so there's no
+    // runaway-growth risk. Tokens piggyback on the rare-find cadence above
+    // (a chance each rare find also drops one) rather than a second
+    // independent rare event, so they inherit the same "stays rare"
+    // guarantee.
     prodigy: {
         tokenDropChance: 0.2,   // fraction of rare finds that also drop a token
         pullCost: 3,            // tokens spent per pull
@@ -123,27 +125,29 @@ export const CONFIG = {
     monetization: {
         earningsBoost: {
             multiplier: 2,
-            durationSeconds: 20 * 60,      // how long the 2x window lasts
-            adCooldownSeconds: 15 * 60,    // how often this ad can be watched again
+            durationSeconds: 5 * 60,       // shortened to match the ~10-15 min run
+            adCooldownSeconds: 4 * 60,
         },
         instantPage: {
-            adCooldownSeconds: 10 * 60,
+            adCooldownSeconds: 3 * 60,
         },
         timeSkips: [
-            { id: 'skip1h', label: '1 Hour', seconds: 60 * 60, mockPrice: '$0.99' },
-            { id: 'skip4h', label: '4 Hours', seconds: 4 * 60 * 60, mockPrice: '$2.99' },
-            { id: 'skip12h', label: '12 Hours', seconds: 12 * 60 * 60, mockPrice: '$6.99' },
+            { id: 'skip5m', label: '5 Minutes', seconds: 5 * 60, mockPrice: '$0.99' },
+            { id: 'skip20m', label: '20 Minutes', seconds: 20 * 60, mockPrice: '$2.99' },
+            { id: 'skip1h', label: '1 Hour', seconds: 60 * 60, mockPrice: '$6.99' },
         ],
+        // icon is what's actually shown in the Store (iconography-only UI);
+        // name is kept for the row's hover tooltip.
         cosmetics: [
-            { id: 'default', name: 'Classic Parchment', mockPrice: 'Free' },
-            { id: 'midnight', name: 'Midnight Ink', mockPrice: '$1.99' },
-            { id: 'golden', name: 'Golden Age', mockPrice: '$2.99' },
+            { id: 'default', name: 'Classic Parchment', icon: '📜', mockPrice: 'Free' },
+            { id: 'midnight', name: 'Midnight Ink', icon: '🌙', mockPrice: '$1.99' },
+            { id: 'golden', name: 'Golden Age', icon: '✨', mockPrice: '$2.99' },
         ],
     },
 
     // Ticks longer than this use an expected-value approximation instead of
-    // simulating every individual keystroke — see simulation.js. Only
-    // matters for offline catch-up; live frames are always well under this.
+    // simulating every individual token. Only matters for offline catch-up
+    // and time-skips; live frames are always well under this.
     performance: {
         fastPathThresholdSeconds: 60,
     },
@@ -151,19 +155,12 @@ export const CONFIG = {
     // How progress is saved to the browser and caught up on return.
     save: {
         storageKey: 'monkeyOfBabelSave',
-        version: 7,                    // bump if the state shape ever changes in a breaking way
+        version: 10,                   // bump if the state shape ever changes in a breaking way
         autosaveIntervalSeconds: 10,
     },
 
     offline: {
-        maxSeconds: 12 * 60 * 60,      // cap simulated catch-up at 12 hours away
-        minSecondsToReport: 30,        // shorter gaps (page refresh) don't pop the "welcome back" banner
-    },
-
-    // The "recent events" ticker: a fixed number of slots, newest first.
-    // It never grows or scrolls — a new event just pushes the oldest one out.
-    feed: {
-        maxItems: 5,
-        minSecondsBetweenEvents: 2,   // throttle so it reads as a ticker, not a flood
+        maxSeconds: 60 * 60,      // cap simulated catch-up — a bounded ~10-15 min run has no use for a 12-hour skip
+        minSecondsToReport: 30,   // shorter gaps (page refresh) don't pop the "welcome back" banner
     },
 };

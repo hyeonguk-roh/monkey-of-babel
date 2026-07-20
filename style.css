@@ -5,7 +5,8 @@
 /* Theme variables — the "Cosmetics" system in the Store panel switches
    these by setting data-theme on <html>. Add a new theme by adding a
    [data-theme="..."] block here, a matching entry in
-   CONFIG.monetization.cosmetics, and nothing else. */
+   CONFIG.monetization.cosmetics, and nothing else.
+   --accent / --dial-track are the affordability-ring / dial colors. */
 :root,
 [data-theme="default"] {
     --bg: #f4efe6;
@@ -20,6 +21,8 @@
     --btn-bg: #3a2f28;
     --btn-text: #f4efe6;
     --btn-hover-bg: #55463b;
+    --accent: #b5651d;
+    --dial-track: #e3d3b8;
 }
 
 [data-theme="midnight"] {
@@ -35,6 +38,8 @@
     --btn-bg: #4a4a7a;
     --btn-text: #e8e6f0;
     --btn-hover-bg: #5c5c94;
+    --accent: #57c7d4;
+    --dial-track: #33335a;
 }
 
 [data-theme="golden"] {
@@ -50,6 +55,8 @@
     --btn-bg: #b8860b;
     --btn-text: #fffbef;
     --btn-hover-bg: #d4a017;
+    --accent: #2f6f6a;
+    --dial-track: #f0dfa0;
 }
 
 body {
@@ -59,187 +66,513 @@ body {
     color: var(--text);
 }
 
+/* ---------- Topbar ---------- */
+
 .topbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px;
-    padding: 16px 24px;
+    gap: 20px;
+    padding: 14px 24px;
     background: var(--topbar-bg);
     color: var(--topbar-text);
 }
 
 .topbar h1 {
     margin: 0;
+    font-size: 2.2rem;
+    line-height: 1;
+    cursor: help;
+    filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.35));
+}
+
+.fame-count {
     font-size: 1.3rem;
+    letter-spacing: 2px;
+    cursor: help;
 }
 
-.stats-row {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-}
-
-.stat-pill {
-    background: #55463b;
-    padding: 6px 14px;
-    border-radius: 999px;
-    font-weight: 600;
-    white-space: nowrap;
-}
+/* ---------- Layout & panel shell ----------
+   One uniform grid, every panel the same size (same width via equal-fr
+   columns, same height via a fixed .panel height) — a deliberate deck of
+   equal cards rather than a HUD with special-cased slots. DOM order carries
+   the visual priority instead (core loop first, Library/Prodigy/Store
+   after), and since there's no grid-auto-flow: dense and no spanning
+   panels, a panel appearing via progressive disclosure only ever adds a
+   card at the end — nothing reflows or reorders. Content that doesn't fit
+   the fixed height scrolls internally rather than stretching its card. */
 
 .layout {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    align-items: start;
+    gap: 22px;
     padding: 24px;
-    max-width: 960px;
+    max-width: 1100px;
     margin: 0 auto;
 }
 
 .panel {
+    height: 460px;
+    overflow-y: auto;
     background: var(--panel-bg);
     border: 1px solid var(--panel-border);
-    border-radius: 12px;
-    padding: 18px 20px;
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 6px 16px rgba(0, 0, 0, 0.06);
 }
 
 .panel h2 {
-    margin-top: 0;
-    font-size: 1.1rem;
+    margin: 0 0 14px;
+    font-size: 2.2rem;
+    line-height: 1;
+    text-align: center;
+    cursor: help;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.15));
 }
 
 .hint {
-    font-size: 0.85rem;
+    font-size: 1.2rem;
     color: var(--muted-text);
-    margin: 6px 0 0;
+    margin: 0 0 12px;
+    text-align: center;
+    line-height: 1;
 }
 
-.meter-outer {
-    width: 100%;
-    height: 16px;
-    background: #e8ddc9;
-    border-radius: 999px;
-    overflow: hidden;
+.hint[title],
+.tile-icon[title],
+.store-subhead[title] {
+    cursor: help;
 }
 
-.meter-inner {
-    height: 100%;
-    width: 0%;
-    transition: width 0.15s linear;
+.store-subhead {
+    font-size: 1.5rem;
+    text-align: center;
+    margin: 20px 0 10px;
+    line-height: 1;
 }
 
-.meter-inner.habitat {
-    background: #8fae5d;
+.store-subhead:first-of-type {
+    margin-top: 4px;
 }
 
-.meter-inner.typewriters {
-    background: #5d84ae;
-}
+/* ---------- Keys: circular embossed typewriter-key buttons ---------- */
 
-.meter-label {
-    margin: 8px 0 0;
-    font-size: 0.9rem;
-    font-weight: 600;
-}
-
-.button-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 14px;
-    flex-wrap: wrap;
-}
-
-.btn {
+.key {
+    position: relative;
     font: inherit;
-    font-weight: 600;
-    font-size: 0.85rem;
-    padding: 8px 14px;
-    border-radius: 8px;
+    font-size: 1.3rem;
+    line-height: 1;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
     border: none;
     background: var(--btn-bg);
     color: var(--btn-text);
     cursor: pointer;
-    transition: background 0.15s ease, opacity 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow:
+        0 3px 0 rgba(0, 0, 0, 0.35),
+        0 5px 8px rgba(0, 0, 0, 0.25),
+        inset 0 1px 1px rgba(255, 255, 255, 0.35);
+    transition: transform 0.08s ease, box-shadow 0.08s ease, background 0.15s ease, opacity 0.15s ease;
 }
 
-.btn:hover:not(:disabled) {
+.key:hover:not(:disabled) {
     background: var(--btn-hover-bg);
 }
 
-.btn:disabled {
-    opacity: 0.4;
+.key:active:not(:disabled) {
+    transform: translateY(3px);
+    box-shadow:
+        0 0 0 rgba(0, 0, 0, 0.35),
+        0 1px 2px rgba(0, 0, 0, 0.25),
+        inset 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.key:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
 }
 
-.training-row {
+.key--wide {
+    width: auto;
+    min-width: 64px;
+    padding: 0 18px;
+    border-radius: 26px;
+}
+
+.key-row {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+.key-prestige {
+    background: linear-gradient(135deg, #6a4c93, #9163cb);
+}
+
+.key-prestige:hover:not(:disabled) {
+    background: linear-gradient(135deg, #7c5aa8, #a476d9);
+}
+
+/* A buy-key's affordability ring: fills up as the budget approaches the
+   cost (clampFraction(budget, cost)), so the picture alone answers "can I
+   press it, and roughly when" — no price label needed. Sits just outside
+   the button as a halo; same conic-gradient trick as .dial below. */
+.key-icon {
+    position: relative;
+    z-index: 1;
+}
+
+.key-ring {
+    --pct: 0;
+    position: absolute;
+    inset: -6px;
+    border-radius: 50%;
+    background: conic-gradient(var(--accent) calc(var(--pct) * 1%), transparent 0);
+    /* The ring paints as a child, above the button's own face — without
+       this, the "ring" is a filled pie sitting on top of the button
+       instead of a thin halo around it. Punching a hole the exact size of
+       the button (ring is 6px bigger on each side, so a 6px inset here
+       removes exactly the button-sized center) leaves only that 6px
+       margin visible. */
+    box-shadow: inset 0 0 0 6px var(--btn-bg);
+    z-index: 0;
+    pointer-events: none;
+}
+
+/* ---------- Dial: still used for the few remaining bounded meters that
+   aren't drawn as literal objects (ad cooldowns, prodigy bonus). Same
+   punched-ring conic-gradient as the affordability ring above. ---------- */
+
+.dial {
+    --pct: 0;
+    display: inline-block;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    vertical-align: middle;
+    cursor: help;
+    background: conic-gradient(var(--accent) calc(var(--pct) * 1%), var(--dial-track) 0);
+    box-shadow: inset 0 0 0 5px var(--panel-bg), 0 1px 2px rgba(0, 0, 0, 0.25);
+    transition: background 0.2s ease;
+}
+
+.dial--sm {
+    width: 24px;
+    height: 24px;
+    box-shadow: inset 0 0 0 4px var(--panel-bg), 0 1px 1px rgba(0, 0, 0, 0.2);
+}
+
+.dial[hidden] {
+    display: none;
+}
+
+/* ---------- Icon tiles: training/store rows as a grid of square cards
+   (icon, then whatever readout, then keys) instead of a text row. ---------- */
+
+.tile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+    gap: 14px;
+}
+
+.tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 16px 10px 14px;
+    background: var(--row-bg);
+    border: 1px solid var(--row-border);
+    border-radius: 14px;
+    text-align: center;
+}
+
+.tile-icon {
+    font-size: 2.1rem;
+    line-height: 1;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
+}
+
+.tile-progress {
+    font-size: 1.1rem;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 10px 0;
-    border-bottom: 1px solid var(--row-border);
-}
-
-.training-row:last-child {
-    border-bottom: none;
-}
-
-.training-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-}
-
-.training-value {
-    font-size: 0.8rem;
+    justify-content: center;
+    gap: 4px;
     color: var(--muted-text);
+    margin: 8px 0;
 }
 
-.training-milestone {
-    font-size: 0.72rem;
-    color: #9163cb;
-    margin-top: 2px;
-}
+/* ---------- Monkeys & typewriters: a waiting-pool strip feeding a grid of
+   typewriter slots. Filling the grid IS the capacity meter. ---------- */
 
-.milestone-hint {
-    color: #9163cb;
-    font-weight: 600;
-}
-
-.buy-group {
+.monkey-pool {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    justify-content: center;
+    min-height: 40px;
 }
 
-.buy-group .btn {
-    font-size: 0.74rem;
-    padding: 5px 8px;
-    white-space: nowrap;
+.monkey-slot {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    border-radius: 8px;
+    background: transparent;
+    border: 1px dashed var(--row-border);
 }
+
+.monkey-slot-idle {
+    border-style: solid;
+    border-color: var(--row-border);
+    background: var(--row-bg);
+}
+
+.monkey-slot-idle.just-arrived {
+    animation: walk-in 0.35s ease-out;
+}
+
+/* flex-wrap, not a fixed-column grid — typewriters.capacity starts at 2 and
+   grows to maxCapacity, and a fixed grid-template-columns would reserve
+   empty track space for slots that don't exist yet at low capacity (a big
+   dead void next to 2 tiny boxes). Flex just wraps however many slots
+   actually exist. */
+.typewriter-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin: 12px 0;
+}
+
+.typewriter-slot {
+    width: 52px;
+    height: 52px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    border-radius: 10px;
+    background: transparent;
+    border: 1px dashed var(--row-border);
+}
+
+.typewriter-slot-occupied {
+    border-style: solid;
+    border-color: var(--accent);
+    background: var(--row-bg);
+}
+
+.typewriter-slot-occupied.just-seated {
+    animation: walk-in 0.35s ease-out;
+}
+
+@keyframes walk-in {
+    from { transform: translateX(-14px); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+/* ---------- The page: the centerpiece. Segments are styled by kind —
+   gibberish reads as visibly mechanical noise, real words/sentences pop,
+   and a rare find is its own gold line. That contrast IS the wordChance/
+   sentenceChance readout; no dial needed. ---------- */
+
+.page-frame {
+    background: #fffdf7;
+    border: 1px solid var(--panel-border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    min-height: 170px;
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.page-view {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.95rem;
+    line-height: 1.7;
+    color: #3a2f28;
+    word-break: break-word;
+    transition: transform 0.4s ease-in, opacity 0.4s ease-in;
+}
+
+.page-view.flying {
+    transform: translateY(-30px) scale(0.94);
+    opacity: 0;
+}
+
+.segment-gibberish {
+    color: #a89a86;
+    letter-spacing: 0.5px;
+}
+
+.segment-word {
+    color: #3a2f28;
+}
+
+.segment-sentence {
+    color: #3a2f28;
+    font-weight: 600;
+}
+
+.segment-rare {
+    display: block;
+    margin: 8px 0;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #fff3c4, #ffe07a);
+    border-left: 4px solid #d9a625;
+    color: #5a4413;
+    font-weight: 700;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    border-radius: 4px;
+    cursor: help;
+}
+
+.page-stack {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-top: 12px;
+    min-height: 22px;
+    font-size: 1.2rem;
+}
+
+/* ---------- Training levels: a row of small filled/unfilled icons instead
+   of a percentage. ---------- */
+
+.level-row {
+    display: flex;
+    gap: 3px;
+    justify-content: center;
+    font-size: 0.85rem;
+    margin: 8px 0;
+}
+
+.level-pip {
+    opacity: 0.25;
+}
+
+.level-pip.filled {
+    opacity: 1;
+}
+
+/* ---------- Coin / ink piles: quantities as denominated objects instead of
+   a formatted number. Each pile is rebuilt from the current denomination
+   counts on render; a slight per-slot jitter (set once per item by index in
+   JS) keeps it reading as a loose pile rather than a grid. ---------- */
+
+.coin-pile,
+.ink-pile {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    justify-content: center;
+    align-items: flex-end;
+    min-height: 44px;
+    margin-top: 8px;
+    cursor: help;
+}
+
+.pile-item {
+    font-size: 1.5rem;
+    display: inline-block;
+}
+
+/* ---------- Shelf: a fixed grid of book slots. Full grid enables Publish —
+   the goal is answered by the picture, not a fraction. ---------- */
+
+/* flex-wrap, same reasoning as .typewriter-grid — a fixed column count
+   would size itself assuming a specific panel width, which no longer holds
+   now that this panel isn't always "wide" (progressive disclosure changes
+   how many panels are visible, which changes how the grid packs them). */
+.shelf-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin: 14px 0;
+}
+
+.book-slot {
+    width: 48px;
+    height: 64px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px dashed var(--row-border);
+}
+
+.book-slot-filled {
+    border-style: solid;
+    border-color: #d9a625;
+    background: linear-gradient(135deg, #fff3c4, #ffe07a);
+}
+
+.book-slot-filled.just-completed {
+    animation: walk-in 0.35s ease-out;
+}
+
+/* ---------- Prodigy token row: literal banana icons toward the next pull,
+   not a fraction. ---------- */
+
+.token-row {
+    display: flex;
+    gap: 4px;
+    justify-content: center;
+    font-size: 1.3rem;
+    margin: 8px 0;
+    cursor: help;
+}
+
+.token-row .dim {
+    opacity: 0.25;
+}
+
+/* ---------- Badge grid: rare quotes, prodigy monkeys, the Library wall,
+   and cosmetics are square icon badges in a wrapping grid — a cabinet of
+   specimens, not stacked text lines. ---------- */
 
 .library-list {
     display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 10px;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 4px;
+    justify-content: center;
 }
 
 .library-row {
-    font-size: 0.82rem;
-    padding: 8px 10px;
-    border-radius: 6px;
-    line-height: 1.4;
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    border-radius: 14px;
+    cursor: help;
+    background: var(--row-bg);
+    border: 1px solid var(--row-border);
 }
 
 .library-row-found {
     background: linear-gradient(135deg, #fff3c4, #ffe07a);
     border: 1px solid #d9a625;
     color: #5a4413;
-    font-weight: 600;
 }
 
 .library-row-unknown {
@@ -250,91 +583,39 @@ body {
 
 .library-row-locked {
     background: transparent;
-    border: 1px dashed #cbbda3;
-    color: #b7ab98;
+    border: 1px dashed var(--dial-track);
+    color: var(--muted-text);
+    font-size: 0.95rem;
 }
 
 .prodigy-rarity-common {
-    background: #f4efe6;
+    background: var(--row-bg);
     border: 1px solid #8fae5d;
-    color: #3a2f28;
 }
 
 .prodigy-rarity-rare {
     background: #eaf1fb;
     border: 1px solid #5d84ae;
-    color: #2c4a6b;
 }
 
 .prodigy-rarity-epic {
     background: #f3ecfb;
     border: 1px solid #9163cb;
-    color: #4a2d70;
 }
 
 .prodigy-rarity-legendary {
     background: linear-gradient(135deg, #fff3c4, #ffe07a);
     border: 1px solid #d9a625;
-    color: #5a4413;
     animation: rare-glow 1.6s ease-in-out infinite;
 }
 
-.offline-banner {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    max-width: 960px;
-    width: calc(100% - 48px);
-    margin: 20px auto 0;
-    padding: 14px 20px;
-    background: #eaf1de;
-    border: 1px solid #b9d18f;
-    border-radius: 10px;
-    color: #3a2f28;
-    font-size: 0.9rem;
+.library-row.clickable {
+    cursor: pointer;
 }
 
-.offline-banner[hidden] {
-    display: none;
-}
-
-.feed {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 14px;
-}
-
-.feed-row {
-    font-size: 0.85rem;
-    padding: 8px 10px;
-    border-radius: 6px;
-    background: var(--row-bg);
-    color: var(--text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.feed-row-empty {
-    color: var(--muted-text);
-    background: transparent;
-    border: 1px dashed var(--row-border);
-}
-
-.feed-row-sentence {
-    background: #fdf3d6;
-    border: 1px solid #e8cf7a;
-    font-weight: 600;
-}
-
-.feed-row-rare {
-    background: linear-gradient(135deg, #fff3c4, #ffe07a);
-    border: 1px solid #d9a625;
-    color: #5a4413;
-    font-weight: 700;
-    animation: rare-glow 1.6s ease-in-out infinite;
+.library-row.clickable:hover {
+    filter: brightness(0.97);
+    transform: translateY(-1px);
 }
 
 @keyframes rare-glow {
@@ -344,36 +625,45 @@ body {
 
 .panel-prestige {
     border-color: #c3aee0;
-    background: linear-gradient(180deg, #fffaf2, #f8f2fb);
+    background: linear-gradient(180deg, var(--panel-bg), color-mix(in srgb, #9163cb 8%, var(--panel-bg)));
 }
 
-.btn-prestige {
-    background: linear-gradient(135deg, #6a4c93, #9163cb);
-    font-size: 0.9rem;
-    padding: 10px 18px;
+.offline-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    max-width: 1040px;
+    width: calc(100% - 48px);
+    margin: 20px auto 0;
+    padding: 14px 20px;
+    background: #eaf1de;
+    border: 1px solid #b9d18f;
+    border-radius: 14px;
+    color: #3a2f28;
+    font-size: 1.2rem;
 }
 
-.btn-prestige:hover:not(:disabled) {
-    background: linear-gradient(135deg, #7c5aa8, #a476d9);
+.offline-banner[hidden] {
+    display: none;
 }
 
-.store-subhead {
-    font-size: 0.8rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--muted-text);
-    margin: 18px 0 4px;
+#offlineBannerText {
+    cursor: help;
 }
 
-.store-subhead:first-of-type {
-    margin-top: 4px;
-}
+@media (prefers-reduced-motion: reduce) {
+    .prodigy-rarity-legendary {
+        animation: none;
+    }
 
-.library-row.clickable {
-    cursor: pointer;
-}
-
-.library-row.clickable:hover {
-    filter: brightness(0.97);
+    .key,
+    .dial,
+    .page-view,
+    .typewriter-slot-occupied,
+    .monkey-slot-idle,
+    .book-slot-filled {
+        transition: none;
+        animation: none;
+    }
 }
