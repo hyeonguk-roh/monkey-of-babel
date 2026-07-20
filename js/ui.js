@@ -505,6 +505,19 @@ function renderTraining(state) {
 // removed each render — the prerequisite for both the landing-bounce below
 // and the coin-fly animations above (an innerHTML rebuild every frame would
 // make either impossible). ---
+//
+// The hundreds digit is otherwise unbounded — intelligence in particular
+// has no spend sink once every training stat hits its level cap, so it
+// free-accumulates for the rest of a run and can reach into the hundreds of
+// thousands. Rendering one sprite per hundred at that scale means thousands
+// of persistent DOM nodes in a single flex-wrap panel; harmless per se, but
+// every getBoundingClientRect() call elsewhere (the fly animations, on
+// every payout/spend/rare find) forces a synchronous layout of that whole
+// subtree, which is what actually reads as stutter. Capping how many
+// hundred-sprites are ever drawn, with a compact "+N" badge for the rest,
+// keeps the "physical pile" feel at normal scale without the DOM blowing up
+// at the extremes.
+const MAX_HUNDREDS_SPRITES = 20;
 
 function decompose(amount) {
     const n = Math.max(0, Math.floor(amount));
@@ -513,6 +526,7 @@ function decompose(amount) {
 
 const pileGroups = new Map(); // container -> { hundreds, tens, ones: <group element> }
 const pileBuckets = new Map(); // container -> { hundreds, tens, ones: <element[]> }
+const pileOverflowEls = new Map(); // container -> overflow badge element
 
 function ensurePile(container) {
     if (pileGroups.has(container)) return pileGroups.get(container);
@@ -549,14 +563,34 @@ function diffPileBucket(group, els, targetCount, icon, rotationBase) {
     }
 }
 
+function renderOverflowBadge(container, overflowAmount) {
+    let badge = pileOverflowEls.get(container);
+    if (overflowAmount <= 0) {
+        if (badge) {
+            badge.remove();
+            pileOverflowEls.delete(container);
+        }
+        return;
+    }
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'pile-overflow';
+        container.appendChild(badge);
+        pileOverflowEls.set(container, badge);
+    }
+    badge.textContent = `+${formatNumber(overflowAmount)}`;
+}
+
 function renderPile(container, amount, icons) {
-    const [ones, tens, hundreds] = decompose(amount);
+    const [ones, tens, hundredsRaw] = decompose(amount);
+    const hundreds = Math.min(hundredsRaw, MAX_HUNDREDS_SPRITES);
     const groups = ensurePile(container);
     const buckets = pileBuckets.get(container);
 
     diffPileBucket(groups.hundreds, buckets.hundreds, hundreds, icons[2], 0);
     diffPileBucket(groups.tens, buckets.tens, tens, icons[1], buckets.hundreds.length);
     diffPileBucket(groups.ones, buckets.ones, ones, icons[0], buckets.hundreds.length + buckets.tens.length);
+    renderOverflowBadge(container, (hundredsRaw - hundreds) * 100);
 
     container.title = formatNumber(amount);
 }

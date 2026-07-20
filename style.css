@@ -595,6 +595,18 @@ body {
     100% { transform: rotate(var(--rot)) scale(1); opacity: 1; }
 }
 
+/* Once a pile's hundreds digit passes MAX_HUNDREDS_SPRITES (js/ui.js), the
+   rest is rolled into this compact badge instead of one sprite per hundred
+   — otherwise a currency with no spend sink (e.g. maxed-out intelligence)
+   would grow the pile to thousands of DOM nodes. */
+.pile-overflow {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--muted-text);
+    align-self: center;
+    margin-left: 2px;
+}
+
 /* ---------- Shelf: a fixed grid of book slots. Full grid enables Publish —
    the goal is answered by the picture, not a fraction. ---------- */
 
