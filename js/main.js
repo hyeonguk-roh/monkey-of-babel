@@ -16,6 +16,7 @@ import {
     showOfflineSummary,
     showProdigyPullResult,
     showStoreMessage,
+    animateSpend,
 } from './ui.js';
 import { saveState, loadState } from './save.js';
 import { applyOfflineProgress } from './offline.js';
@@ -30,6 +31,7 @@ import {
     purchaseCosmetic,
     setActiveCosmetic,
 } from './monetization.js';
+import { unlockAudio, isMuted, toggleMuted } from './sound.js';
 
 const saved = loadState();
 const state = saved ? saved.state : createInitialState();
@@ -46,8 +48,25 @@ dom.recallOneBtn.addEventListener('click', () => { recallWorker(state); render(s
 dom.fillTypewritersBtn.addEventListener('click', () => { fillTypewriters(state); render(state); });
 dom.clearTypewritersBtn.addEventListener('click', () => { clearTypewriters(state); render(state); });
 
-dom.buyTypewriterBtn.addEventListener('click', () => { purchaseUpgrade(state, 'typewriters'); render(state); });
-dom.buyHabitatBtn.addEventListener('click', () => { purchaseUpgrade(state, 'habitat'); render(state); });
+// Coins should visibly leave the pile on a money spend, same as they
+// visibly arrive on a payout — animateSpend has to fire (and set its hold
+// window) before render(state) runs, so the pile still shows the pre-spend
+// total on this frame while the coins are in flight. Only the two capacity
+// upgrades below spend money; training spends intelligence instead, so it
+// doesn't touch the coin pile.
+function spendMoneyAndRender(btnEl, spend) {
+    const before = state.currencies.money;
+    const spent = spend();
+    if (spent && state.currencies.money < before) animateSpend(btnEl);
+    render(state);
+}
+
+dom.buyTypewriterBtn.addEventListener('click', () => {
+    spendMoneyAndRender(dom.buyTypewriterBtn, () => purchaseUpgrade(state, 'typewriters'));
+});
+dom.buyHabitatBtn.addEventListener('click', () => {
+    spendMoneyAndRender(dom.buyHabitatBtn, () => purchaseUpgrade(state, 'habitat'));
+});
 
 for (const key of Object.keys(dom.trainTiles)) {
     dom.trainTiles[key].btn.addEventListener('click', () => { purchaseTraining(state, key); render(state); });
@@ -112,6 +131,18 @@ dom.cosmeticRows.forEach((row, i) => {
         render(state);
     });
 });
+
+function updateMuteBtn() {
+    dom.muteBtn.textContent = isMuted() ? '🔇' : '🔊';
+    dom.muteBtn.title = isMuted() ? 'Unmute sound' : 'Mute sound';
+}
+updateMuteBtn();
+dom.muteBtn.addEventListener('click', () => { toggleMuted(); updateMuteBtn(); });
+
+// AudioContext playback is gated on a real user gesture — unlock it on the
+// very first one anywhere on the page, well before any clack needs to play.
+document.addEventListener('pointerdown', unlockAudio, { once: true });
+document.addEventListener('keydown', unlockAudio, { once: true });
 
 render(state);
 

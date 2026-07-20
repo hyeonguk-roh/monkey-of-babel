@@ -21,12 +21,14 @@ import {
     isCosmeticOwned,
     getActiveCosmetic,
 } from './monetization.js';
+import { playClack, playPageComplete, playCoin, playChime } from './sound.js';
 
 const dom = {};
 
 // Grabs every element the game touches, once, at startup.
 export function cacheDom() {
     dom.fameCount = document.getElementById('fameCount');
+    dom.muteBtn = document.getElementById('muteBtn');
 
     dom.offlineBanner = document.getElementById('offlineBanner');
     dom.offlineBannerText = document.getElementById('offlineBannerText');
@@ -44,6 +46,7 @@ export function cacheDom() {
     dom.buyTypewriterBtn = document.getElementById('buyTypewriterBtn');
     dom.buyTypewriterRing = document.getElementById('buyTypewriterRing');
 
+    dom.pagePanel = document.getElementById('pagePanel');
     dom.pageView = document.getElementById('pageView');
     dom.pageStack = document.getElementById('pageStack');
 
@@ -146,19 +149,77 @@ function setDial(el, fraction, title) {
     if (title !== undefined) el.title = title;
 }
 
+// A floating emoji that arcs from one element's screen position to
+// another's, via a CSS keyframe animation driven by custom properties (so
+// one generic animation covers every source/destination pair). Used for
+// coins flying page->pile (a payout) and pile->button (a spend), and pages
+// flying page->stack. Purely decorative — appended to <body> as position:
+// fixed and removed once its animation finishes.
+function spawnFlight({ fromRect, toRect, emoji, count = 1, duration = 400 }) {
+    for (let i = 0; i < count; i++) {
+        const el = document.createElement('span');
+        el.className = 'fly-sprite';
+        el.textContent = emoji;
+
+        const jitterX = count > 1 ? (Math.random() * 2 - 1) * 20 : 0;
+        const x0 = fromRect.left + fromRect.width / 2;
+        const y0 = fromRect.top + fromRect.height / 2;
+        const x1 = toRect.left + toRect.width / 2 + jitterX;
+        const y1 = toRect.top + toRect.height / 2;
+        const mx = (x0 + x1) / 2;
+        const my = Math.min(y0, y1) - 50;
+
+        el.style.setProperty('--x0', `${x0}px`);
+        el.style.setProperty('--y0', `${y0}px`);
+        el.style.setProperty('--xm', `${mx}px`);
+        el.style.setProperty('--ym', `${my}px`);
+        el.style.setProperty('--x1', `${x1}px`);
+        el.style.setProperty('--y1', `${y1}px`);
+
+        const delay = i * 50;
+        el.style.animationDelay = `${delay}ms`;
+        el.style.animationDuration = `${duration}ms`;
+
+        document.body.appendChild(el);
+        setTimeout(() => el.remove(), duration + delay + 60);
+    }
+}
+
+// Coins spent on a purchase visibly leave the pile — flies from the coin
+// pile to whatever button was just pressed, and holds the pile's displayed
+// total at its pre-spend value until the coins land (see syncDisplayedMoney).
+export function animateSpend(targetEl) {
+    const pileRect = dom.coinPile.getBoundingClientRect();
+    const targetRect = targetEl.getBoundingClientRect();
+    spawnFlight({ fromRect: pileRect, toRect: targetRect, emoji: '🟡', count: 2, duration: 320 });
+    moneyFlightUntil = Math.max(moneyFlightUntil, performance.now() + 320);
+}
+
 // A buy key's affordability ring fills toward 100% as budget approaches
-// cost — the picture alone answers "can I press it, and roughly when."
+// cost — the picture alone answers "can I press it, and roughly when." The
+// moment it first reaches 100%, the key pulses once — the idle-game
+// heartbeat pointing at the next satisfying click.
+const affordabilityPrev = new WeakMap();
+
 function renderAffordability(btnEl, ringEl, cost, budget, costLabel) {
     if (cost === null) {
         btnEl.disabled = true;
         ringEl.style.setProperty('--pct', 100);
         btnEl.title = 'Maxed';
+        affordabilityPrev.set(btnEl, true);
         return;
     }
     const fraction = clampFraction(budget, cost);
     ringEl.style.setProperty('--pct', fraction * 100);
-    btnEl.disabled = fraction < 1;
+    const affordable = fraction >= 1;
+    btnEl.disabled = !affordable;
     btnEl.title = `${costLabel} (${formatNumber(cost)})`;
+
+    if (affordable && affordabilityPrev.get(btnEl) === false) {
+        btnEl.classList.add('pulse');
+        btnEl.addEventListener('animationend', () => btnEl.classList.remove('pulse'), { once: true });
+    }
+    affordabilityPrev.set(btnEl, affordable);
 }
 
 export function showOfflineSummary(summary) {
@@ -193,13 +254,28 @@ function renderPanelVisibility(state) {
     return { libraryUnlocked, prodigyUnlocked, storeUnlocked };
 }
 
+// Buffered display value for the coin pile — state.currencies.money changes
+// the instant a payout or purchase happens, but the pile should only visibly
+// change once the flying coin sprites finish their trip (see spawnFlight /
+// animateSpend). Snaps to the true value immediately whenever no flight is
+// in progress, so it never drifts out of sync for longer than one flight.
+let displayedMoney = null;
+let moneyFlightUntil = 0;
+
+function syncDisplayedMoney(state) {
+    if (displayedMoney === null || performance.now() >= moneyFlightUntil) {
+        displayedMoney = state.currencies.money;
+    }
+    return displayedMoney;
+}
+
 export function render(state) {
     renderTopbar(state);
     renderMonkeysAndTypewriters(state);
     renderPage(state);
     renderTraining(state);
     renderPile(dom.inkPile, state.currencies.intelligence, ['💧', '🧴', '📖']);
-    renderPile(dom.coinPile, state.currencies.money, ['🟤', '⚪', '🟡']);
+    renderPile(dom.coinPile, syncDisplayedMoney(state), ['🟤', '⚪', '🟡']);
     renderShelf(state);
 
     const { libraryUnlocked, prodigyUnlocked, storeUnlocked } = renderPanelVisibility(state);
@@ -280,7 +356,20 @@ function renderMonkeysAndTypewriters(state) {
 }
 
 // --- The page: appends only newly-typed segments each render, and plays a
-// fly-out transition on whatever's accumulated when a page completes. ---
+// fly-out transition on whatever's accumulated when a page completes. A
+// persistent blinking caret is kept as the last child at all times — even
+// on the empty page at run start, where it alone signals "waiting for
+// monkeys." ---
+
+let caretEl = null;
+function ensureCaret() {
+    if (!caretEl) {
+        caretEl = document.createElement('span');
+        caretEl.className = 'page-caret';
+        caretEl.textContent = '▌';
+    }
+    return caretEl;
+}
 
 let renderedSegmentCount = 0;
 let lastPageCompletions = -1;
@@ -291,12 +380,24 @@ function renderPage(state) {
     if (state.page.completions !== lastPageCompletions) {
         lastPageCompletions = state.page.completions;
         renderedSegmentCount = state.page.segments.length; // the reset already happened in state
+
+        const pageRect = dom.pageView.getBoundingClientRect();
+        const moneyDelta = state.currencies.money - displayedMoney;
+        if (moneyDelta > 0) {
+            spawnFlight({ fromRect: pageRect, toRect: dom.coinPile.getBoundingClientRect(), emoji: '🟡', count: 3 });
+            moneyFlightUntil = Math.max(moneyFlightUntil, performance.now() + 420);
+            playCoin();
+        }
+        spawnFlight({ fromRect: pageRect, toRect: dom.pageStack.getBoundingClientRect(), emoji: '📄', count: 1 });
+        playPageComplete();
+
         dom.pageView.classList.add('flying');
         setTimeout(() => {
             dom.pageView.classList.remove('flying');
             dom.pageView.innerHTML = '';
+            dom.pageView.appendChild(ensureCaret());
+            renderPageStack(state);
         }, 400);
-        renderPageStack(state);
         return;
     }
 
@@ -306,14 +407,38 @@ function renderPage(state) {
         const el = document.createElement(seg.type === 'rare' ? 'div' : 'span');
         el.className = `segment-${seg.type}`;
         el.textContent = seg.text;
+        dom.pageView.appendChild(el);
+
         if (seg.type === 'rare') {
             el.title = seg.text.trim() + (seg.payout ? ` — +${formatNumber(seg.payout)} money` : '');
+            makeRareFindAMoment(el, state);
+        } else {
+            playClack();
         }
-        dom.pageView.appendChild(el);
     }
     renderedSegmentCount = segments.length;
+    dom.pageView.appendChild(ensureCaret());
 
     renderPageStack(state);
+}
+
+// Rares are the game's one dopamine spike — a shimmer sweep across the
+// gold line, a small panel shake, the chime (distinct from the coin clink),
+// and a bigger coin burst instead of a normal quiet payout.
+function makeRareFindAMoment(el, state) {
+    el.classList.add('shimmer');
+    el.addEventListener('animationend', () => el.classList.remove('shimmer'), { once: true });
+
+    dom.pagePanel.classList.add('shake');
+    dom.pagePanel.addEventListener('animationend', () => dom.pagePanel.classList.remove('shake'), { once: true });
+
+    playChime();
+
+    const moneyDelta = state.currencies.money - displayedMoney;
+    if (moneyDelta > 0) {
+        spawnFlight({ fromRect: el.getBoundingClientRect(), toRect: dom.coinPile.getBoundingClientRect(), emoji: '🟡', count: 6 });
+        moneyFlightUntil = Math.max(moneyFlightUntil, performance.now() + 480);
+    }
 }
 
 function renderPageStack(state) {
@@ -333,7 +458,10 @@ function renderPageStack(state) {
 }
 
 // --- Training: a row of level pips (a literal countable purchase count,
-// not a percentage) plus a buy key with an affordability ring. ---
+// not a percentage) plus a buy key with an affordability ring. A newly
+// filled pip gets a little pop when a level is bought. ---
+
+const pipLevelPrev = new WeakMap();
 
 function renderLevelPips(container, level, levels) {
     if (container.childElementCount !== levels) {
@@ -344,10 +472,22 @@ function renderLevelPips(container, level, levels) {
             pip.textContent = '●';
             container.appendChild(pip);
         }
+        pipLevelPrev.set(container, 0);
     }
     for (let i = 0; i < levels; i++) {
         container.children[i].classList.toggle('filled', i < level);
     }
+
+    const prevLevel = pipLevelPrev.get(container) ?? 0;
+    if (level > prevLevel) {
+        const newest = container.children[level - 1];
+        if (newest) {
+            newest.classList.add('pop');
+            newest.addEventListener('animationend', () => newest.classList.remove('pop'), { once: true });
+        }
+    }
+    pipLevelPrev.set(container, level);
+
     container.title = `Level ${level} / ${levels}`;
 }
 
@@ -360,28 +500,64 @@ function renderTraining(state) {
     }
 }
 
-// --- Coin / ink piles: quantities as denominated objects. ---
+// --- Coin / ink piles: quantities as denominated objects, diffed against
+// the previous denomination counts so only the changed items are added or
+// removed each render — the prerequisite for both the landing-bounce below
+// and the coin-fly animations above (an innerHTML rebuild every frame would
+// make either impossible). ---
 
 function decompose(amount) {
     const n = Math.max(0, Math.floor(amount));
     return [n % 10, Math.floor(n / 10) % 10, Math.floor(n / 100)];
 }
 
+const pileGroups = new Map(); // container -> { hundreds, tens, ones: <group element> }
+const pileBuckets = new Map(); // container -> { hundreds, tens, ones: <element[]> }
+
+function ensurePile(container) {
+    if (pileGroups.has(container)) return pileGroups.get(container);
+
+    container.innerHTML = '';
+    const groups = {};
+    for (const bucket of ['hundreds', 'tens', 'ones']) {
+        // display: contents (see style.css) lets these wrapper groups sit in
+        // the DOM as a stable append point per denomination while still
+        // laying out their children directly in the parent's flex-wrap pile.
+        const group = document.createElement('div');
+        group.className = 'pile-group';
+        container.appendChild(group);
+        groups[bucket] = group;
+    }
+    pileGroups.set(container, groups);
+    pileBuckets.set(container, { hundreds: [], tens: [], ones: [] });
+    return groups;
+}
+
+function diffPileBucket(group, els, targetCount, icon, rotationBase) {
+    while (els.length < targetCount) {
+        const item = document.createElement('span');
+        item.className = 'pile-item pile-item-landing';
+        item.textContent = icon;
+        const idx = rotationBase + els.length;
+        item.style.setProperty('--rot', `${((idx % 5) - 2) * 4}deg`);
+        group.appendChild(item);
+        els.push(item);
+        item.addEventListener('animationend', () => item.classList.remove('pile-item-landing'), { once: true });
+    }
+    while (els.length > targetCount) {
+        els.pop().remove();
+    }
+}
+
 function renderPile(container, amount, icons) {
     const [ones, tens, hundreds] = decompose(amount);
-    container.innerHTML = '';
-    let idx = 0;
-    const groups = [[hundreds, icons[2]], [tens, icons[1]], [ones, icons[0]]];
-    for (const [count, icon] of groups) {
-        for (let i = 0; i < count; i++) {
-            const item = document.createElement('span');
-            item.className = 'pile-item';
-            item.textContent = icon;
-            item.style.transform = `rotate(${((idx % 5) - 2) * 4}deg)`;
-            container.appendChild(item);
-            idx += 1;
-        }
-    }
+    const groups = ensurePile(container);
+    const buckets = pileBuckets.get(container);
+
+    diffPileBucket(groups.hundreds, buckets.hundreds, hundreds, icons[2], 0);
+    diffPileBucket(groups.tens, buckets.tens, tens, icons[1], buckets.hundreds.length);
+    diffPileBucket(groups.ones, buckets.ones, ones, icons[0], buckets.hundreds.length + buckets.tens.length);
+
     container.title = formatNumber(amount);
 }
 

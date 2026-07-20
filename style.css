@@ -90,6 +90,21 @@ body {
     font-size: 1.3rem;
     letter-spacing: 2px;
     cursor: help;
+    margin-right: auto;
+    margin-left: 20px;
+}
+
+.key--mute {
+    width: 40px;
+    height: 40px;
+    font-size: 1.1rem;
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--topbar-text);
+    box-shadow: none;
+}
+
+.key--mute:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.22);
 }
 
 /* ---------- Layout & panel shell ----------
@@ -195,6 +210,18 @@ body {
 .key:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+}
+
+/* The idle-game heartbeat: the moment a key's affordability ring first
+   reaches 100%, it pulses once to point at the next satisfying click. */
+.key.pulse {
+    animation: key-pulse 0.4s ease;
+}
+
+@keyframes key-pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.12); }
+    100% { transform: scale(1); }
 }
 
 .key--wide {
@@ -412,6 +439,20 @@ body {
     opacity: 0;
 }
 
+/* A persistent blinking caret at the end of the typed text — present even
+   on the empty page at run start, where it alone says "waiting for
+   monkeys" without a word of copy. */
+.page-caret {
+    display: inline-block;
+    color: var(--accent);
+    animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+}
+
 .segment-gibberish {
     color: #a89a86;
     letter-spacing: 0.5px;
@@ -437,6 +478,37 @@ body {
     font-family: 'Segoe UI', system-ui, sans-serif;
     border-radius: 4px;
     cursor: help;
+}
+
+/* One-time shimmer sweep the moment a rare find lands — a second background
+   layer (the sweep highlight) slides across on top of the segment's own
+   gold gradient, which stays put as a separate, non-animated layer. */
+.segment-rare.shimmer {
+    background-image:
+        linear-gradient(120deg, transparent 40%, rgba(255, 255, 255, 0.85) 50%, transparent 60%),
+        linear-gradient(135deg, #fff3c4, #ffe07a);
+    background-size: 250% 100%, 100% 100%;
+    background-position: -100% 0, 0 0;
+    animation: rare-shimmer 0.9s ease-out;
+}
+
+@keyframes rare-shimmer {
+    from { background-position: -100% 0, 0 0; }
+    to { background-position: 100% 0, 0 0; }
+}
+
+/* The page panel gets a small shake alongside the shimmer — together with
+   the chime and coin burst, this is what makes a rare find feel like a
+   moment instead of a normal quiet payout. */
+#pagePanel.shake {
+    animation: panel-shake 0.35s ease-in-out;
+}
+
+@keyframes panel-shake {
+    10%, 90% { transform: translateX(-2px); }
+    20%, 80% { transform: translateX(2px); }
+    30%, 50%, 70% { transform: translateX(-2px); }
+    40%, 60% { transform: translateX(2px); }
 }
 
 .page-stack {
@@ -468,10 +540,24 @@ body {
     opacity: 1;
 }
 
+.level-pip.pop {
+    animation: pip-pop 0.35s ease-out;
+}
+
+@keyframes pip-pop {
+    0% { transform: scale(1); }
+    45% { transform: scale(1.6); }
+    100% { transform: scale(1); }
+}
+
 /* ---------- Coin / ink piles: quantities as denominated objects instead of
-   a formatted number. Each pile is rebuilt from the current denomination
-   counts on render; a slight per-slot jitter (set once per item by index in
-   JS) keeps it reading as a loose pile rather than a grid. ---------- */
+   a formatted number. Each pile holds a persistent per-denomination group
+   (hundreds/tens/ones) that's diffed against the previous counts on render —
+   only newly-appeared or removed items touch the DOM, which is what makes
+   the landing-bounce below possible (a full innerHTML rebuild every frame
+   would restart it every time). A slight per-item rotation jitter (set once
+   via --rot when the item is created) keeps it reading as a loose pile
+   rather than a grid. ---------- */
 
 .coin-pile,
 .ink-pile {
@@ -485,9 +571,28 @@ body {
     cursor: help;
 }
 
+/* display: contents lets each denomination's wrapper participate in the
+   pile's own flex-wrap layout as if its items were direct children, while
+   still giving JS a stable per-bucket node to append/remove from. */
+.pile-group {
+    display: contents;
+}
+
 .pile-item {
+    --rot: 0deg;
     font-size: 1.5rem;
     display: inline-block;
+    transform: rotate(var(--rot));
+}
+
+.pile-item-landing {
+    animation: pile-land 0.35s ease-out;
+}
+
+@keyframes pile-land {
+    0% { transform: rotate(var(--rot)) scale(0.3) translateY(-10px); opacity: 0; }
+    60% { transform: rotate(var(--rot)) scale(1.2); opacity: 1; }
+    100% { transform: rotate(var(--rot)) scale(1); opacity: 1; }
 }
 
 /* ---------- Shelf: a fixed grid of book slots. Full grid enables Publish —
@@ -652,6 +757,36 @@ body {
     cursor: help;
 }
 
+/* ---------- Flying sprites: coins/pages arcing between two elements
+   (page -> coin pile, coin pile -> a purchase key, page -> page stack).
+   Positioned fixed at the source point, then animated to the destination
+   via a keyframe animation driven by per-instance --x0/--y0/--xm/--ym/--x1/
+   --y1 custom properties (a midpoint raised above the straight line is what
+   gives the "arc"), so one animation covers every source/destination pair. */
+.fly-sprite {
+    position: fixed;
+    left: 0;
+    top: 0;
+    font-size: 1.3rem;
+    line-height: 1;
+    pointer-events: none;
+    z-index: 999;
+    /* Resting state matches the animation's final frame, so disabling the
+       animation under prefers-reduced-motion still lands it at the
+       destination instead of stranding it at the viewport origin. */
+    transform: translate(var(--x1), var(--y1)) scale(0.55);
+    opacity: 0.85;
+    animation-name: fly-arc;
+    animation-timing-function: ease-in-out;
+    animation-fill-mode: forwards;
+}
+
+@keyframes fly-arc {
+    0%   { transform: translate(var(--x0), var(--y0)) scale(1); opacity: 1; }
+    55%  { transform: translate(var(--xm), var(--ym)) scale(0.9); opacity: 1; }
+    100% { transform: translate(var(--x1), var(--y1)) scale(0.55); opacity: 0.85; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .prodigy-rarity-legendary {
         animation: none;
@@ -660,9 +795,16 @@ body {
     .key,
     .dial,
     .page-view,
+    .page-caret,
     .typewriter-slot-occupied,
     .monkey-slot-idle,
-    .book-slot-filled {
+    .book-slot-filled,
+    .fly-sprite,
+    .pile-item-landing,
+    .segment-rare.shimmer,
+    #pagePanel.shake,
+    .key.pulse,
+    .level-pip.pop {
         transition: none;
         animation: none;
     }
